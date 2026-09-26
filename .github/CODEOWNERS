@@ -1,6 +1,6 @@
 # Владельцы по умолчанию — для всех файлов вне frontend/ и backend/
-*            @test1 @test2 @test3 @test4
 
-# Более поздние правила имеют приоритет
-/frontend/   @test1 @test2
-/backend/    @test3 @test4
+* @Chaice1 @Kiryukha @mrpeet21 @Arseny-P @dollyshern @LikeSomeDude
+
+/frontend/   @Arseny-P @dollyshern
+/backend/    @Chaice1 @Kiryukha
