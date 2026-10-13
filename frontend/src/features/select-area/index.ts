@@ -1,1 +1,1 @@
-export { SelectArea } from "./ui/SelectArea";
+export { SelectArea } from './ui/SelectArea';
