@@ -1,0 +1,88 @@
+import os
+from typing import Dict, Any
+import networkx as nx
+import osmnx as ox
+import geopandas as gpd
+
+# Настройки OSMnx по умолчанию
+ox.settings.log_console = False
+ox.settings.use_cache = True
+
+
+class RoadNetworkService:
+    """
+    Сервис загрузки, обработки и экспорта базовой дорожной сети OpenStreetMap.
+    """
+
+    def __init__(self, storage_dir: str = "data"):
+        self.storage_dir = storage_dir
+        os.makedirs(self.storage_dir, exist_ok=True)
+
+    def fetch_and_build(
+        self, 
+        place_name: str, 
+        network_type: str = "drive", 
+        simplify: bool = True
+    ) -> nx.MultiDiGraph:
+        """
+        Загружает дорожную сеть из OSM и строит топологически корректный граф дорог.
+        """
+        print(f"[*] Загрузка данных дорожной сети OSM для: '{place_name}'...")
+        graph = ox.graph_from_place(
+            place_name, 
+            network_type=network_type, 
+            simplify=simplify
+        )
+        print(f"[+] Дорожная сеть построена: {len(graph.nodes)} вершин, {len(graph.edges)} ребер.")
+        return graph
+
+    def save_graphml(self, graph: nx.MultiDiGraph, filename: str) -> str:
+        """
+        Сохраняет дорожный граф в формате GraphML на диск.
+        """
+        filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
+        ox.save_graphml(graph, filepath=filepath)
+        print(f"[+] Дорожный граф сохранен в GraphML: {filepath}")
+        return filepath
+
+    def load_graphml(self, filename: str) -> nx.MultiDiGraph:
+        """
+        Загружает дорожный граф из файла GraphML без обращения к интернету.
+        """
+        filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
+        if not os.path.exists(filepath):
+            raise FileNotFoundError(f"Файл дорожного графа не найден: {filepath}")
+
+        graph = ox.load_graphml(filepath=filepath)
+        print(f"[+] Дорожный граф загружен из файла: {len(graph.nodes)} узлов, {len(graph.edges)} ребер.")
+        return graph
+
+    def export_to_geojson(self, graph: nx.MultiDiGraph, filename: str) -> str:
+        """
+        Экспортирует дорожную сеть в формат GeoJSON для отображения дорожного слоя во фронтенде.
+        """
+        filepath = os.path.join(self.storage_dir, f"{filename}.geojson")
+        _, edges_gdf = ox.graph_to_gdfs(graph)
+
+        columns_to_keep = ["name", "length", "highway", "maxspeed", "geometry"]
+        existing_columns = [col for col in columns_to_keep if col in edges_gdf.columns]
+        edges_clean = edges_gdf[existing_columns].copy()
+
+        for col in edges_clean.columns:
+            if col != "geometry":
+                edges_clean[col] = edges_clean[col].astype(str)
+
+        edges_clean.to_file(filepath, driver="GeoJSON")
+        print(f"[+] GeoJSON дорожного графа сохранен в: {filepath}")
+        return filepath
+
+    def get_summary(self, graph: nx.MultiDiGraph) -> Dict[str, Any]:
+        """
+        Возвращает базовую статистику дорожной сети.
+        """
+        return {
+            "total_nodes": len(graph.nodes),
+            "total_edges": len(graph.edges),
+            "sample_nodes": list(graph.nodes(data=True))[:3],
+            "sample_edges": list(graph.edges(data=True))[:3]
+        }
