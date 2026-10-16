@@ -52,24 +52,24 @@ class GraphService:
         graph: nx.MultiDiGraph, 
         points: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
-        return self.facility_service.snap_to_road_network(road_graph=graph, points=points)
+        return self.facility_service.snap_to_road_network(road_graph=graph, nodes=points)
 
     # --- Логистический граф и маршрутизация ---
     def build_logistics_graph(
         self, 
         road_graph: nx.MultiDiGraph, 
-        snapped_points: List[Dict[str, Any]]
-    ) -> nx.DiGraph:
-        return self.logistics_service.build_logistics_graph(road_graph=road_graph, snapped_points=snapped_points)
+        snapped_points: List[Any]
+    ) -> nx.MultiGraph:
+        return self.logistics_service.build_logistics_graph(road_graph=road_graph, snapped_nodes=snapped_points)
 
-    def save_logistics_graph(self, log_graph: nx.DiGraph, filename: str) -> str:
+    def save_logistics_graph(self, log_graph: nx.MultiGraph, filename: str) -> str:
         return self.logistics_service.save_graphml(log_graph=log_graph, filename=filename)
 
-    def load_logistics_graph(self, filename: str) -> nx.DiGraph:
+    def load_logistics_graph(self, filename: str) -> nx.MultiGraph:
         return self.logistics_service.load_graphml(filename=filename)
 
-    def export_logistics_graph_to_geojson(self, log_graph: nx.DiGraph, filename: str) -> str:
+    def export_logistics_graph_to_geojson(self, log_graph: nx.MultiGraph, filename: str) -> str:
         return self.logistics_service.export_to_geojson(log_graph=log_graph, filename=filename)
 
-    def get_logistics_graph_summary(self, log_graph: nx.DiGraph) -> Dict[str, Any]:
+    def get_logistics_graph_summary(self, log_graph: nx.MultiGraph) -> Dict[str, Any]:
         return self.logistics_service.get_summary(log_graph=log_graph)

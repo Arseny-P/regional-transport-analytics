@@ -61,30 +61,26 @@ def main():
     # ----------------------------------------------------
     print("\n>>> ШАГ 3: Привязка (Snapping) логистических объектов к графу дорог...")
     active_points = osm_points + points if (use_osm_pois and osm_points) else points
-    snapped_points = facility_service.snap_to_road_network(road_graph=road_graph, points=active_points)
-    print(f"[V] Все {len(snapped_points)} объектов успешно привязаны к вершинам графа OSM.")
+    snapped_nodes = facility_service.snap_to_road_network(road_graph=road_graph, nodes=active_points)
+    print(f"[V] Все {len(snapped_nodes)} объектов успешно привязаны к вершинам графа OSM.")
 
     # ----------------------------------------------------
-    # ШАГ 4: Построение логистического графа связей
+    # ШАГ 4: Построение логистического MultiGraph
     # ----------------------------------------------------
-    print("\n>>> ШАГ 4: Расчет автомобильных маршрутов и синтез логистического графа...")
-    log_graph = logistics_service.build_logistics_graph(road_graph=road_graph, snapped_points=snapped_points)
+    print("\n>>> ШАГ 4: Расчет автомобильных маршрутов и синтез логистического MultiGraph...")
+    log_graph = logistics_service.build_logistics_graph(road_graph=road_graph, snapped_nodes=snapped_nodes)
 
     summary = logistics_service.get_summary(log_graph=log_graph)
-    print(f"\n--- Сводка логистического графа ---")
+    print(f"\n--- Сводка логистического MultiGraph ---")
     print(f"Хабов (вершин): {summary['total_hubs']}")
-    print(f"Маршрутов (рёбер): {summary['total_routes']}")
+    print(f"Логистических связей: {summary['total_connections']}")
     print(f"Средняя длина маршрута: {summary['avg_route_distance_km']} км")
-    if summary.get("min_route"):
-        min_r = summary["min_route"]
-        print(f"Кратчайшее плечо: {min_r['from']} ➔ {min_r['to']} ({min_r['distance_km']} км)")
-    if summary.get("max_route"):
-        max_r = summary["max_route"]
-        print(f"Самое длинное плечо: {max_r['from']} ➔ {max_r['to']} ({max_r['distance_km']} км)")
     
-    print("\nРазнообразные примеры рассчитанных транспортных связей:")
-    for route in summary["sample_routes"]:
-        print(f"  • {route['from']} ➔ {route['to']}: {route['distance_km']} км ({route['osm_nodes_count']} точек дороги)")
+    print("\nПримеры рассчитанных связей (с раздельными плечами A→B и B→A):")
+    for conn in summary["sample_connections"]:
+        print(f"  • {conn['pair']} [{conn['mode'].upper()}]:")
+        print(f"      ➔ Вперёд (A->B): {conn['dist_ab_km']} км (статус: {conn['status_ab']})")
+        print(f"      ⬅ Обратно (B->A): {conn['dist_ba_km']} км (статус: {conn['status_ba']})")
 
     # ----------------------------------------------------
     # ШАГ 5: Экспорт и сериализация логистического графа

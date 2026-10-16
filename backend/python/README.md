@@ -56,13 +56,13 @@ python main.py
    * Используется как подложка для точной автомобильной маршрутизации с учетом одностороннего движения.
    * Формат: `data/kronshtadt_network.graphml` и `data/kronshtadt_network.geojson`.
 
-2. **Логистический граф (Logistics OD Graph)**:
-   * Абстрактный направленный граф (`nx.DiGraph`), связывающий ключевые хабы региона.
-   * **Вершины**: логистические объекты со свойствами (`id`, `name`, `type`, `lat`, `lon`, `osm_node`).
-   * **Рёбра**: реальные автомобильные маршруты между хабами со свойствами (`distance_m`, `osm_nodes_count`, `geometry` реального изгиба дорог в виде `LineString`).
+2. **Логистический граф (Logistics MultiGraph)**:
+   * Ненаправленный мультиграф (`nx.MultiGraph`), связывающий ключевые хабы региона в соответствии со спецификацией PM/DS.
+   * **Вершины (`LogisticsNode`)**: самостоятельные логистические объекты со свойствами (`id`, `name`, `object_type`, `latitude`, `longitude`, `region_ids`, `verification_status`, `transport_modes`, `nearest_osm_node`, `snap_distance_m`).
+   * **Рёбра (`LogisticsEdge`)**: одно логическое ребро на вид транспорта (`road`) между парой объектов `(node_a, node_b)`, содержащее раздельные характеристики направлений `A ➔ B` и `B ➔ A` (`distance_ab_m`/`distance_ba_m`, `route_status_ab`/`route_status_ba`, `geometry_ab_wkt`/`geometry_ba_wkt`).
    * Формат: 
-     * `data/kronshtadt_logistics.graphml` — для ML-модуля (анализ топологии, метрики регулярности).
-     * `data/kronshtadt_logistics.geojson` — для визуализации на фронтенде (Leaflet, Mapbox, geojson.io).
+     * `data/kronshtadt_logistics.graphml` — для ML-модуля (анализ топологии, метрики связности).
+     * `data/kronshtadt_logistics.geojson` — для визуализации на фронтенде (маркеры хабов с плечами привязки + линии маршрутов).
 
 ---
 

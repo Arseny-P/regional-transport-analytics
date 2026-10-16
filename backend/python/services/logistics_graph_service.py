@@ -1,15 +1,17 @@
 import os
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 import networkx as nx
 from shapely.geometry import Point, LineString, MultiLineString, mapping
 from shapely.ops import linemerge
 from shapely import wkt
 
+from models import LogisticsNode, LogisticsEdge, TransportMode, RouteStatus
+
 
 class LogisticsGraphService:
     """
-    Сервис маршрутизации, синтеза логистического графа связей и его экспорта (GraphML / GeoJSON).
+    Сервис маршрутизации, синтеза логистического MultiGraph и его экспорта (GraphML / GeoJSON).
     """
 
     def __init__(self, storage_dir: str = "data"):
@@ -38,132 +40,238 @@ class LogisticsGraphService:
             return LineString(coords)
         return merged
 
+    def _calculate_single_route(
+        self, 
+        road_graph: nx.MultiDiGraph, 
+        u_osm: int, 
+        v_osm: int
+    ) -> Dict[str, Any]:
+        """
+        Рассчитывает маршрут в одном направлении между узлами OSM дорожной сети.
+        """
+        if not nx.has_path(road_graph, u_osm, v_osm):
+            return {
+                "status": RouteStatus.NOT_FOUND_IN_DATA.value,
+                "distance_m": None,
+                "nodes_count": 0,
+                "path": [],
+                "geom_wkt": None
+            }
+
+        length_m = nx.shortest_path_length(road_graph, source=u_osm, target=v_osm, weight="length")
+        path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=u_osm, target=v_osm, weight="length")]
+        route_geom = self._extract_route_geometry(road_graph, path_nodes)
+
+        return {
+            "status": RouteStatus.FOUND.value,
+            "distance_m": round(float(length_m), 1),
+            "nodes_count": len(path_nodes),
+            "path": path_nodes,
+            "geom_wkt": route_geom.wkt
+        }
+
     def build_logistics_graph(
         self, 
         road_graph: nx.MultiDiGraph, 
-        snapped_points: List[Dict[str, Any]]
-    ) -> nx.DiGraph:
+        snapped_nodes: List[Union[LogisticsNode, Dict[str, Any]]]
+    ) -> nx.MultiGraph:
         """
-        Формирует логистический граф (OD-граф):
+        Формирует логистический NetworkX MultiGraph:
         - Вершины: логистические объекты со свойствами.
-        - Рёбра: рассчитанные автомобильные маршруты между ними (длина, число узлов, геометрия).
+        - Рёбра: по 1 ребру на вид транспорта (road) между парой (node_a, node_b)
+          с раздельными характеристиками направлений A -> B и B -> A.
         """
-        log_graph = nx.DiGraph()
+        log_graph = nx.MultiGraph()
 
-        # 1. Добавляем вершины (логистические хабы)
-        for point in snapped_points:
+        nodes: List[LogisticsNode] = []
+        for n in snapped_nodes:
+            if isinstance(n, LogisticsNode):
+                nodes.append(n)
+            else:
+                nodes.append(
+                    LogisticsNode(
+                        id=str(n["id"]),
+                        name=str(n["name"]),
+                        object_type=str(n.get("object_type") or n.get("type", "facility")),
+                        latitude=float(n.get("latitude") or n.get("lat")),
+                        longitude=float(n.get("longitude") or n.get("lon")),
+                        nearest_osm_node=n.get("nearest_osm_node"),
+                        osm_node_lat=n.get("osm_node_lat"),
+                        osm_node_lon=n.get("osm_node_lon"),
+                        snap_distance_m=n.get("snap_distance_m")
+                    )
+                )
+
+        for node in nodes:
             log_graph.add_node(
-                str(point["id"]),
-                name=str(point["name"]),
-                lat=float(point["lat"]),
-                lon=float(point["lon"]),
-                type=str(point.get("type", "facility")),
-                osm_node=int(point["nearest_osm_node"])
+                node.id,
+                name=node.name,
+                object_type=node.object_type,
+                latitude=node.latitude,
+                longitude=node.longitude,
+                region_ids=",".join(node.region_ids),
+                verification_status=node.verification_status,
+                transport_modes=",".join(node.transport_modes),
+                nearest_osm_node=node.nearest_osm_node or 0,
+                osm_node_lat=node.osm_node_lat or 0.0,
+                osm_node_lon=node.osm_node_lon or 0.0,
+                snap_distance_m=node.snap_distance_m or 0.0
             )
 
-        print(f"[*] Расчет кратчайших автомобильных маршрутов между {len(snapped_points)} объектами...")
-        routes_found = 0
+        print(f"[*] Расчет потенциальной автомобильной доступности для {len(nodes)} объектов (MultiGraph)...")
+        total_connections = 0
 
-        # 2. Ищем пути между всеми парами объектов
-        for i, src in enumerate(snapped_points):
-            for j, dst in enumerate(snapped_points):
-                if i == j:
+        for i in range(len(nodes)):
+            for j in range(i + 1, len(nodes)):
+                node_a = nodes[i]
+                node_b = nodes[j]
+
+                if not node_a.nearest_osm_node or not node_b.nearest_osm_node:
                     continue
 
-                u_osm = int(src["nearest_osm_node"])
-                v_osm = int(dst["nearest_osm_node"])
+                u_osm = int(node_a.nearest_osm_node)
+                v_osm = int(node_b.nearest_osm_node)
 
-                if not nx.has_path(road_graph, u_osm, v_osm):
-                    print(f"  [!] Нет пути: '{src['name']}' -> '{dst['name']}'")
+                route_ab = self._calculate_single_route(road_graph, u_osm, v_osm)
+                route_ba = self._calculate_single_route(road_graph, v_osm, u_osm)
+
+                has_route_ab = route_ab["status"] == RouteStatus.FOUND.value
+                has_route_ba = route_ba["status"] == RouteStatus.FOUND.value
+
+                if not has_route_ab and not has_route_ba:
                     continue
 
-                length_m = nx.shortest_path_length(road_graph, source=u_osm, target=v_osm, weight="length")
-                path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=u_osm, target=v_osm, weight="length")]
-                route_geom = self._extract_route_geometry(road_graph, path_nodes)
+                edge_obj = LogisticsEdge(
+                    node_a=node_a.id,
+                    node_b=node_b.id,
+                    node_a_name=node_a.name,
+                    node_b_name=node_b.name,
+                    transport_mode=TransportMode.ROAD.value,
+                    distance_ab_m=route_ab["distance_m"],
+                    route_status_ab=route_ab["status"],
+                    osm_nodes_count_ab=route_ab["nodes_count"],
+                    path_osm_nodes_ab=route_ab["path"],
+                    geometry_ab_wkt=route_ab["geom_wkt"],
+                    distance_ba_m=route_ba["distance_m"],
+                    route_status_ba=route_ba["status"],
+                    osm_nodes_count_ba=route_ba["nodes_count"],
+                    path_osm_nodes_ba=route_ba["path"],
+                    geometry_ba_wkt=route_ba["geom_wkt"],
+                    connection_status="candidate"
+                )
+
+                edge_dict = edge_obj.to_dict()
+                clean_attrs = {}
+                for k, v in edge_dict.items():
+                    if v is None:
+                        clean_attrs[k] = ""
+                    elif isinstance(v, (list, dict)):
+                        clean_attrs[k] = json.dumps(v)
+                    else:
+                        clean_attrs[k] = v
 
                 log_graph.add_edge(
-                    str(src["id"]),
-                    str(dst["id"]),
-                    source_name=str(src["name"]),
-                    target_name=str(dst["name"]),
-                    distance_m=round(float(length_m), 2),
-                    osm_nodes_count=len(path_nodes),
-                    path_osm_nodes=json.dumps(path_nodes),
-                    geometry=route_geom.wkt
+                    node_a.id,
+                    node_b.id,
+                    key=TransportMode.ROAD.value,
+                    **clean_attrs
                 )
-                routes_found += 1
+                total_connections += 1
 
-        print(f"[+] Логистический граф сформирован: Вершин: {len(log_graph.nodes)}, Рёбер (маршрутов): {len(log_graph.edges)}")
+        print(f"[+] Логистический MultiGraph сформирован: {len(log_graph.nodes)} вершин, {len(log_graph.edges)} логистических связей.")
         return log_graph
 
-    def save_graphml(self, log_graph: nx.DiGraph, filename: str) -> str:
+    def save_graphml(self, log_graph: nx.MultiGraph, filename: str) -> str:
         """
-        Сохраняет логистический граф в GraphML (для ML-модуля и повторной загрузки).
+        Сохраняет логистический MultiGraph в GraphML.
         """
         filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
         nx.write_graphml(log_graph, filepath)
-        print(f"[+] Логистический граф сохранен в GraphML: {filepath}")
+        print(f"[+] Логистический MultiGraph сохранен в GraphML: {filepath}")
         return filepath
 
-    def load_graphml(self, filename: str) -> nx.DiGraph:
+    def load_graphml(self, filename: str) -> nx.MultiGraph:
         """
-        Загружает логистический граф из файла GraphML.
+        Загружает логистический MultiGraph из файла GraphML.
         """
         filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Файл {filepath} не найден!")
 
         graph = nx.read_graphml(filepath)
-        print(f"[+] Логистический граф загружен из GraphML: {len(graph.nodes)} узлов, {len(graph.edges)} ребер.")
+        print(f"[+] Логистический MultiGraph загружен из GraphML: {len(graph.nodes)} узлов, {len(graph.edges)} связей.")
         return graph
 
-    def export_to_geojson(self, log_graph: nx.DiGraph, filename: str) -> str:
+    def export_to_geojson(self, log_graph: nx.MultiGraph, filename: str) -> str:
         """
-        Экспортирует логистический граф в GeoJSON (точки объектов + линии маршрутов).
-        Готов для прямой визуализации на фронтенде (Leaflet, Mapbox, geojson.io).
+        Экспортирует логистический MultiGraph в GeoJSON для Frontend:
+        - Хабы: маркеры с метаданными и snap_distance_m.
+        - Маршруты: доступные линии направлений A -> B и B -> A с дистанциями.
         """
         filepath = os.path.join(self.storage_dir, f"{filename}.geojson")
         features = []
 
-        # 1. Добавляем точки (логистические объекты)
         for node_id, data in log_graph.nodes(data=True):
-            point_geom = Point(float(data["lon"]), float(data["lat"]))
-            feature = {
+            lat = float(data.get("latitude", 0.0))
+            lon = float(data.get("longitude", 0.0))
+            point_geom = Point(lon, lat)
+
+            features.append({
                 "type": "Feature",
                 "geometry": mapping(point_geom),
                 "properties": {
                     "feature_type": "logistics_hub",
                     "id": node_id,
                     "name": data.get("name", node_id),
-                    "hub_type": data.get("type", "unknown"),
-                    "osm_node": data.get("osm_node")
+                    "object_type": data.get("object_type", "facility"),
+                    "snap_distance_m": data.get("snap_distance_m", 0.0),
+                    "nearest_osm_node": data.get("nearest_osm_node", 0),
+                    "region_ids": data.get("region_ids", "ru-spb")
                 }
-            }
-            features.append(feature)
+            })
 
-        # 2. Добавляем ребра (маршруты между объектами)
-        for u, v, data in log_graph.edges(data=True):
-            geom_val = data.get("geometry")
-            if isinstance(geom_val, str):
-                line_geom = wkt.loads(geom_val)
-            else:
-                line_geom = geom_val
+        for u, v, key, data in log_graph.edges(keys=True, data=True):
+            # Линия A -> B
+            geom_ab = data.get("geometry_ab_wkt")
+            if geom_ab and data.get("route_status_ab") == RouteStatus.FOUND.value:
+                line_geom = wkt.loads(geom_ab) if isinstance(geom_ab, str) else geom_ab
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(line_geom),
+                    "properties": {
+                        "feature_type": "transport_route",
+                        "transport_mode": key,
+                        "direction": "ab",
+                        "source_id": u,
+                        "target_id": v,
+                        "source_name": data.get("node_a_name", u),
+                        "target_name": data.get("node_b_name", v),
+                        "distance_m": data.get("distance_ab_m"),
+                        "osm_nodes_count": data.get("osm_nodes_count_ab"),
+                        "title": f"{data.get('node_a_name', u)} → {data.get('node_b_name', v)}"
+                    }
+                })
 
-            feature = {
-                "type": "Feature",
-                "geometry": mapping(line_geom),
-                "properties": {
-                    "feature_type": "transport_route",
-                    "source_id": u,
-                    "target_id": v,
-                    "source_name": data.get("source_name", u),
-                    "target_name": data.get("target_name", v),
-                    "distance_m": data.get("distance_m"),
-                    "osm_nodes_count": data.get("osm_nodes_count"),
-                    "title": f"{data.get('source_name', u)} → {data.get('target_name', v)}"
-                }
-            }
-            features.append(feature)
+            # Линия B -> A
+            geom_ba = data.get("geometry_ba_wkt")
+            if geom_ba and data.get("route_status_ba") == RouteStatus.FOUND.value:
+                line_geom = wkt.loads(geom_ba) if isinstance(geom_ba, str) else geom_ba
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(line_geom),
+                    "properties": {
+                        "feature_type": "transport_route",
+                        "transport_mode": key,
+                        "direction": "ba",
+                        "source_id": v,
+                        "target_id": u,
+                        "source_name": data.get("node_b_name", v),
+                        "target_name": data.get("node_a_name", u),
+                        "distance_m": data.get("distance_ba_m"),
+                        "osm_nodes_count": data.get("osm_nodes_count_ba"),
+                        "title": f"{data.get('node_b_name', v)} → {data.get('node_a_name', u)}"
+                    }
+                })
 
         geojson_doc = {
             "type": "FeatureCollection",
@@ -173,60 +281,50 @@ class LogisticsGraphService:
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(geojson_doc, f, ensure_ascii=False, indent=2)
 
-        print(f"[+] GeoJSON логистического графа (объекты + маршруты) сохранен в: {filepath}")
+        print(f"[+] GeoJSON логистического MultiGraph сохранен в: {filepath}")
         return filepath
 
-    def get_summary(self, log_graph: nx.DiGraph) -> Dict[str, Any]:
+    def get_summary(self, log_graph: nx.MultiGraph) -> Dict[str, Any]:
         """
-        Формирует аналитическую сводку по построенному логистическому графу.
+        Формирует аналитическую сводку по логистическому MultiGraph.
         """
         nodes_list = [
-            {"id": n, "name": d.get("name"), "type": d.get("type"), "coords": (d.get("lat"), d.get("lon"))}
+            {
+                "id": n, 
+                "name": d.get("name"), 
+                "type": d.get("object_type"), 
+                "snap_dist_m": d.get("snap_distance_m")
+            }
             for n, d in log_graph.nodes(data=True)
         ]
-        
-        edges_summary = []
-        for u, v, d in log_graph.edges(data=True):
-            edges_summary.append({
-                "from": d.get("source_name", u),
-                "to": d.get("target_name", v),
-                "distance_km": round(float(d.get("distance_m", 0)) / 1000, 2),
-                "osm_nodes_count": d.get("osm_nodes_count")
+
+        connections = []
+        all_distances_km = []
+
+        for u, v, key, d in log_graph.edges(keys=True, data=True):
+            dist_ab = d.get("distance_ab_m")
+            dist_ba = d.get("distance_ba_m")
+
+            if dist_ab is not None:
+                all_distances_km.append(round(dist_ab / 1000, 2))
+            if dist_ba is not None:
+                all_distances_km.append(round(dist_ba / 1000, 2))
+
+            connections.append({
+                "pair": f"{d.get('node_a_name', u)} ⟷ {d.get('node_b_name', v)}",
+                "mode": key,
+                "dist_ab_km": round(dist_ab / 1000, 2) if dist_ab else None,
+                "dist_ba_km": round(dist_ba / 1000, 2) if dist_ba else None,
+                "status_ab": d.get("route_status_ab"),
+                "status_ba": d.get("route_status_ba")
             })
 
-        distances = [float(d.get("distance_m", 0)) for _, _, d in log_graph.edges(data=True)]
-        avg_distance_km = round(sum(distances) / len(distances) / 1000, 2) if distances else 0.0
-
-        # Разнообразная выборка: берем по 1 маршруту от разных пунктов отправления
-        seen_sources = set()
-        diverse_routes = []
-        for route in edges_summary:
-            src = route["from"]
-            if src not in seen_sources:
-                diverse_routes.append(route)
-                seen_sources.add(src)
-                if len(diverse_routes) >= 6:
-                    break
-
-        # Если уникальных отправных пунктов меньше 5, дополняем любыми доступными
-        if len(diverse_routes) < 5 and edges_summary:
-            for route in edges_summary:
-                if route not in diverse_routes:
-                    diverse_routes.append(route)
-                    if len(diverse_routes) >= 5:
-                        break
-
-        # Находим самый короткий и самый длинный маршруты в сети
-        sorted_routes = sorted(edges_summary, key=lambda x: x["distance_km"]) if edges_summary else []
-        min_route = sorted_routes[0] if sorted_routes else None
-        max_route = sorted_routes[-1] if sorted_routes else None
+        avg_dist = round(sum(all_distances_km) / len(all_distances_km), 2) if all_distances_km else 0.0
 
         return {
             "total_hubs": len(log_graph.nodes),
-            "total_routes": len(log_graph.edges),
-            "avg_route_distance_km": avg_distance_km,
-            "min_route": min_route,
-            "max_route": max_route,
+            "total_connections": len(log_graph.edges),
+            "avg_route_distance_km": avg_dist,
             "hubs": nodes_list,
-            "sample_routes": diverse_routes
+            "sample_connections": connections[:5]
         }

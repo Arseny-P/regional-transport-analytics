@@ -6,6 +6,7 @@ cache/
 PM-research/
 
 CONTEXT.md
+PYTHON_GRAPH_SERVICE_STRUCTURE.md
 
 # Ignore generated heavy graphs, but keep sample test data
 data/*.graphml
