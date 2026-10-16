@@ -8,20 +8,31 @@ def main():
     facility_service = FacilityService(storage_dir=DATA_DIR)
     logistics_service = LogisticsGraphService(storage_dir=DATA_DIR)
     
-    AREA_NAME = "Кронштадт, Россия"
-    ROAD_GRAPH_ALIAS = "kronshtadt_network"
-    LOGISTICS_GRAPH_ALIAS = "kronshtadt_logistics"
-    SEED_POINTS_FILE = "test_logistics_points.json"
+    is_shushary = "--shushary" in sys.argv or "--shushary-district" in sys.argv
+
+    if is_shushary:
+        AREA_NAME = "Шушары, Санкт-Петербург, Россия"
+        WHICH_RESULT = 3
+        ROAD_GRAPH_ALIAS = "shushary_network"
+        LOGISTICS_GRAPH_ALIAS = "shushary_logistics"
+        SEED_POINTS_FILE = "test_shushary_points.json"
+    else:
+        AREA_NAME = "Кронштадт, Россия"
+        WHICH_RESULT = None
+        ROAD_GRAPH_ALIAS = "kronshtadt_network"
+        LOGISTICS_GRAPH_ALIAS = "kronshtadt_logistics"
+        SEED_POINTS_FILE = "test_logistics_points.json"
 
     print("=" * 60)
     print("ТРАНСПОРТНО-ЛОГИСТИЧЕСКИЙ АНАЛИТИЧЕСКИЙ СЕРВИС")
+    print(f"Целевая территория: {AREA_NAME}")
     print("Модульная архитектура: RoadNetwork + Facilities + LogisticsGraph")
     print("=" * 60)
 
     # ----------------------------------------------------
     # ШАГ 1: Получение автомобильной дорожной сети
     # ----------------------------------------------------
-    print("\n>>> ШАГ 1: Загрузка автомобильной дорожной сети...")
+    print(f"\n>>> ШАГ 1: Загрузка автомобильной дорожной сети для '{AREA_NAME}'...")
     road_graph_path = os.path.join(DATA_DIR, f"{ROAD_GRAPH_ALIAS}.graphml")
     
     if os.path.exists(road_graph_path) and "--refetch" not in sys.argv:
@@ -29,7 +40,7 @@ def main():
         road_graph = road_service.load_graphml(filename=ROAD_GRAPH_ALIAS)
     else:
         print(f"[*] Скачивание дорожной сети из OSM для: '{AREA_NAME}'...")
-        road_graph = road_service.fetch_and_build(place_name=AREA_NAME)
+        road_graph = road_service.fetch_and_build(place_name=AREA_NAME, which_result=WHICH_RESULT)
         road_service.save_graphml(road_graph, filename=ROAD_GRAPH_ALIAS)
         road_service.export_to_geojson(road_graph, filename=ROAD_GRAPH_ALIAS)
 
@@ -50,7 +61,7 @@ def main():
     osm_points = []
     if use_osm_pois:
         print("\n[*] Запрос объектов напрямую из OSM...")
-        osm_points = facility_service.fetch_from_osm(place_name=AREA_NAME, limit=5)
+        osm_points = facility_service.fetch_from_osm(place_name=AREA_NAME, limit=5, which_result=WHICH_RESULT)
         if osm_points:
             print(f"[*] Получено {len(osm_points)} объектов из OSM:")
             for op in osm_points:
@@ -68,7 +79,18 @@ def main():
     # ШАГ 4: Построение логистического MultiGraph
     # ----------------------------------------------------
     print("\n>>> ШАГ 4: Расчет автомобильных маршрутов и синтез логистического MultiGraph...")
-    log_graph = logistics_service.build_logistics_graph(road_graph=road_graph, snapped_nodes=snapped_nodes)
+    knn_val = None
+    for idx, arg in enumerate(sys.argv):
+        if arg.startswith("--knn="):
+            knn_val = int(arg.split("=")[1])
+        elif arg == "--knn" and idx + 1 < len(sys.argv):
+            knn_val = int(sys.argv[idx + 1])
+
+    log_graph = logistics_service.build_logistics_graph(
+        road_graph=road_graph, 
+        snapped_nodes=snapped_nodes,
+        k_neighbors=knn_val
+    )
 
     summary = logistics_service.get_summary(log_graph=log_graph)
     print(f"\n--- Сводка логистического MultiGraph ---")

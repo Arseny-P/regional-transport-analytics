@@ -58,9 +58,14 @@ class GraphService:
     def build_logistics_graph(
         self, 
         road_graph: nx.MultiDiGraph, 
-        snapped_points: List[Any]
+        snapped_points: List[Any],
+        k_neighbors: Optional[int] = None
     ) -> nx.MultiGraph:
-        return self.logistics_service.build_logistics_graph(road_graph=road_graph, snapped_nodes=snapped_points)
+        return self.logistics_service.build_logistics_graph(
+            road_graph=road_graph, 
+            snapped_nodes=snapped_points,
+            k_neighbors=k_neighbors
+        )
 
     def save_logistics_graph(self, log_graph: nx.MultiGraph, filename: str) -> str:
         return self.logistics_service.save_graphml(log_graph=log_graph, filename=filename)

@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
 import geopandas as gpd
@@ -7,6 +7,8 @@ import geopandas as gpd
 # Настройки OSMnx по умолчанию
 ox.settings.log_console = False
 ox.settings.use_cache = True
+# Надежное зеркало Overpass для защиты от перегрузки основного сервера
+ox.settings.overpass_endpoint = "https://overpass.kumi.systems/api"
 
 
 class RoadNetworkService:
@@ -22,17 +24,18 @@ class RoadNetworkService:
         self, 
         place_name: str, 
         network_type: str = "drive", 
-        simplify: bool = True
+        simplify: bool = True,
+        which_result: Optional[int] = None
     ) -> nx.MultiDiGraph:
         """
         Загружает дорожную сеть из OSM и строит топологически корректный граф дорог.
         """
         print(f"[*] Загрузка данных дорожной сети OSM для: '{place_name}'...")
-        graph = ox.graph_from_place(
-            place_name, 
-            network_type=network_type, 
-            simplify=simplify
-        )
+        kwargs = {"network_type": network_type, "simplify": simplify}
+        if which_result is not None:
+            kwargs["which_result"] = which_result
+
+        graph = ox.graph_from_place(place_name, **kwargs)
         print(f"[+] Дорожная сеть построена: {len(graph.nodes)} вершин, {len(graph.edges)} ребер.")
         return graph
 

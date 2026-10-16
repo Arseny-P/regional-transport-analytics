@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Any, Union
+from typing import List, Dict, Any, Union, Optional
 import networkx as nx
 from shapely.geometry import Point, LineString, MultiLineString, mapping
 from shapely.ops import linemerge
@@ -40,46 +40,69 @@ class LogisticsGraphService:
             return LineString(coords)
         return merged
 
-    def _calculate_single_route(
+    def _calculate_best_route(
         self, 
         road_graph: nx.MultiDiGraph, 
-        u_osm: int, 
-        v_osm: int
+        start_nodes: List[int], 
+        end_nodes: List[int]
     ) -> Dict[str, Any]:
         """
-        Рассчитывает маршрут в одном направлении между узлами OSM дорожной сети.
+        Находит наилучший (кратчайший) маршрут среди пула кандидатов точек подключения.
+        Реализует исследовательский алгоритм find_best_route из ноутбука PM (п. 7.11).
         """
-        if not nx.has_path(road_graph, u_osm, v_osm):
+        best_distance = float("inf")
+        best_u = None
+        best_v = None
+
+        for u in start_nodes:
+            for v in end_nodes:
+                if u == v:
+                    continue
+                try:
+                    d = nx.shortest_path_length(road_graph, source=u, target=v, weight="length")
+                    if d < best_distance:
+                        best_distance = d
+                        best_u = u
+                        best_v = v
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    continue
+
+        if best_u is None or best_v is None or best_distance == float("inf"):
             return {
                 "status": RouteStatus.NOT_FOUND_IN_DATA.value,
                 "distance_m": None,
                 "nodes_count": 0,
                 "path": [],
-                "geom_wkt": None
+                "geom_wkt": None,
+                "access_u": None,
+                "access_v": None
             }
 
-        length_m = nx.shortest_path_length(road_graph, source=u_osm, target=v_osm, weight="length")
-        path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=u_osm, target=v_osm, weight="length")]
+        path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=best_u, target=best_v, weight="length")]
         route_geom = self._extract_route_geometry(road_graph, path_nodes)
 
         return {
             "status": RouteStatus.FOUND.value,
-            "distance_m": round(float(length_m), 1),
+            "distance_m": round(float(best_distance), 1),
             "nodes_count": len(path_nodes),
             "path": path_nodes,
-            "geom_wkt": route_geom.wkt
+            "geom_wkt": route_geom.wkt,
+            "access_u": best_u,
+            "access_v": best_v
         }
 
     def build_logistics_graph(
         self, 
         road_graph: nx.MultiDiGraph, 
-        snapped_nodes: List[Union[LogisticsNode, Dict[str, Any]]]
+        snapped_nodes: List[Union[LogisticsNode, Dict[str, Any]]],
+        k_neighbors: Optional[int] = None
     ) -> nx.MultiGraph:
         """
         Формирует логистический NetworkX MultiGraph:
-        - Вершины: логистические объекты со свойствами.
-        - Рёбра: по 1 ребру на вид транспорта (road) между парой (node_a, node_b)
+        - Вершины: логистические объекты со свойствами и access_nodes.
+        - Рёбра: по 1 ребру на вид транспорта (road) между парами объектов
           с раздельными характеристиками направлений A -> B и B -> A.
+        - При указании k_neighbors: формирует разреженный граф k ближайших соседей (п. 9.2).
         """
         log_graph = nx.MultiGraph()
 
@@ -98,7 +121,8 @@ class LogisticsGraphService:
                         nearest_osm_node=n.get("nearest_osm_node"),
                         osm_node_lat=n.get("osm_node_lat"),
                         osm_node_lon=n.get("osm_node_lon"),
-                        snap_distance_m=n.get("snap_distance_m")
+                        snap_distance_m=n.get("snap_distance_m"),
+                        access_nodes=n.get("access_nodes", [n.get("nearest_osm_node")] if n.get("nearest_osm_node") else [])
                     )
                 )
 
@@ -115,68 +139,92 @@ class LogisticsGraphService:
                 nearest_osm_node=node.nearest_osm_node or 0,
                 osm_node_lat=node.osm_node_lat or 0.0,
                 osm_node_lon=node.osm_node_lon or 0.0,
-                snap_distance_m=node.snap_distance_m or 0.0
+                snap_distance_m=node.snap_distance_m or 0.0,
+                access_nodes=json.dumps(node.access_nodes)
             )
 
-        print(f"[*] Расчет потенциальной автомобильной доступности для {len(nodes)} объектов (MultiGraph)...")
+        # Формируем список пар для проверки маршрутов
+        pairs_to_check = set()
+        if k_neighbors is not None and k_neighbors > 0 and len(nodes) > 1:
+            print(f"[*] Отбор пар методом k={k_neighbors} ближайших соседей (k-NN sparsification)...")
+            import osmnx as ox
+            for i, src in enumerate(nodes):
+                # Считаем расстояния до всех остальных объектов
+                dists = []
+                for j, dst in enumerate(nodes):
+                    if i != j:
+                        d = ox.distance.great_circle(src.latitude, src.longitude, dst.latitude, dst.longitude)
+                        dists.append((j, d))
+                dists.sort(key=lambda x: x[1])
+                for j, _ in dists[:k_neighbors]:
+                    pair = tuple(sorted([i, j]))
+                    pairs_to_check.add(pair)
+            print(f"[+] Отобрано {len(pairs_to_check)} пар-кандидатов из {len(nodes) * (len(nodes) - 1) // 2} возможных.")
+        else:
+            print(f"[*] Полный перебор всех пар объектов (всего {len(nodes) * (len(nodes) - 1) // 2} пар)...")
+            for i in range(len(nodes)):
+                for j in range(i + 1, len(nodes)):
+                    pairs_to_check.add((i, j))
+
         total_connections = 0
 
-        for i in range(len(nodes)):
-            for j in range(i + 1, len(nodes)):
-                node_a = nodes[i]
-                node_b = nodes[j]
+        for i, j in sorted(pairs_to_check):
+            node_a = nodes[i]
+            node_b = nodes[j]
 
-                if not node_a.nearest_osm_node or not node_b.nearest_osm_node:
-                    continue
+            # Пул точек подключения (или fallback на nearest_osm_node)
+            access_a = node_a.access_nodes or ([node_a.nearest_osm_node] if node_a.nearest_osm_node else [])
+            access_b = node_b.access_nodes or ([node_b.nearest_osm_node] if node_b.nearest_osm_node else [])
 
-                u_osm = int(node_a.nearest_osm_node)
-                v_osm = int(node_b.nearest_osm_node)
+            if not access_a or not access_b:
+                continue
 
-                route_ab = self._calculate_single_route(road_graph, u_osm, v_osm)
-                route_ba = self._calculate_single_route(road_graph, v_osm, u_osm)
+            # Находим лучший маршрут туда (A -> B) и обратно (B -> A) среди кандидатов
+            route_ab = self._calculate_best_route(road_graph, access_a, access_b)
+            route_ba = self._calculate_best_route(road_graph, access_b, access_a)
 
-                has_route_ab = route_ab["status"] == RouteStatus.FOUND.value
-                has_route_ba = route_ba["status"] == RouteStatus.FOUND.value
+            has_route_ab = route_ab["status"] == RouteStatus.FOUND.value
+            has_route_ba = route_ba["status"] == RouteStatus.FOUND.value
 
-                if not has_route_ab and not has_route_ba:
-                    continue
+            if not has_route_ab and not has_route_ba:
+                continue
 
-                edge_obj = LogisticsEdge(
-                    node_a=node_a.id,
-                    node_b=node_b.id,
-                    node_a_name=node_a.name,
-                    node_b_name=node_b.name,
-                    transport_mode=TransportMode.ROAD.value,
-                    distance_ab_m=route_ab["distance_m"],
-                    route_status_ab=route_ab["status"],
-                    osm_nodes_count_ab=route_ab["nodes_count"],
-                    path_osm_nodes_ab=route_ab["path"],
-                    geometry_ab_wkt=route_ab["geom_wkt"],
-                    distance_ba_m=route_ba["distance_m"],
-                    route_status_ba=route_ba["status"],
-                    osm_nodes_count_ba=route_ba["nodes_count"],
-                    path_osm_nodes_ba=route_ba["path"],
-                    geometry_ba_wkt=route_ba["geom_wkt"],
-                    connection_status="candidate"
-                )
+            edge_obj = LogisticsEdge(
+                node_a=node_a.id,
+                node_b=node_b.id,
+                node_a_name=node_a.name,
+                node_b_name=node_b.name,
+                transport_mode=TransportMode.ROAD.value,
+                distance_ab_m=route_ab["distance_m"],
+                route_status_ab=route_ab["status"],
+                osm_nodes_count_ab=route_ab["nodes_count"],
+                path_osm_nodes_ab=route_ab["path"],
+                geometry_ab_wkt=route_ab["geom_wkt"],
+                distance_ba_m=route_ba["distance_m"],
+                route_status_ba=route_ba["status"],
+                osm_nodes_count_ba=route_ba["nodes_count"],
+                path_osm_nodes_ba=route_ba["path"],
+                geometry_ba_wkt=route_ba["geom_wkt"],
+                connection_status="candidate"
+            )
 
-                edge_dict = edge_obj.to_dict()
-                clean_attrs = {}
-                for k, v in edge_dict.items():
-                    if v is None:
-                        clean_attrs[k] = ""
-                    elif isinstance(v, (list, dict)):
-                        clean_attrs[k] = json.dumps(v)
-                    else:
-                        clean_attrs[k] = v
+            edge_dict = edge_obj.to_dict()
+            clean_attrs = {}
+            for k, v in edge_dict.items():
+                if v is None:
+                    clean_attrs[k] = ""
+                elif isinstance(v, (list, dict)):
+                    clean_attrs[k] = json.dumps(v)
+                else:
+                    clean_attrs[k] = v
 
-                log_graph.add_edge(
-                    node_a.id,
-                    node_b.id,
-                    key=TransportMode.ROAD.value,
-                    **clean_attrs
-                )
-                total_connections += 1
+            log_graph.add_edge(
+                node_a.id,
+                node_b.id,
+                key=TransportMode.ROAD.value,
+                **clean_attrs
+            )
+            total_connections += 1
 
         print(f"[+] Логистический MultiGraph сформирован: {len(log_graph.nodes)} вершин, {len(log_graph.edges)} логистических связей.")
         return log_graph
