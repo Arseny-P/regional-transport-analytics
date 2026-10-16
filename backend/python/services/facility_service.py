@@ -59,7 +59,8 @@ class FacilityService:
         place_name: str, 
         tags: Optional[Dict[str, Any]] = None,
         limit: int = 15,
-        region_id: str = "ru-spb"
+        region_id: str = "ru-spb",
+        which_result: Optional[int] = None
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM с умной фильтрацией.
@@ -75,7 +76,10 @@ class FacilityService:
 
         print(f"[*] Поиск логистических объектов в OSM для: '{place_name}'...")
         try:
-            gdf = ox.features_from_place(place_name, tags)
+            kwargs = {"tags": tags}
+            if which_result is not None:
+                kwargs["which_result"] = which_result
+            gdf = ox.features_from_place(place_name, **kwargs)
         except Exception as e:
             print(f"[-] Ошибка при запросе к OSM Overpass API: {e}")
             return []
@@ -167,29 +171,46 @@ class FacilityService:
         lons = [n.longitude for n in log_nodes]
         lats = [n.latitude for n in log_nodes]
 
-        nearest_node_ids = ox.nearest_nodes(road_graph, X=lons, Y=lats)
+        primary_node_ids = ox.nearest_nodes(road_graph, X=lons, Y=lats)
 
         snapped_nodes: List[LogisticsNode] = []
-        for node, osm_id in zip(log_nodes, nearest_node_ids):
-            node_id_native = int(osm_id)
-            osm_node_data = road_graph.nodes[node_id_native]
-            osm_lat = float(osm_node_data.get("y"))
-            osm_lon = float(osm_node_data.get("x"))
+        for node, primary_id in zip(log_nodes, primary_node_ids):
+            primary_id_native = int(primary_id)
 
-            dist_m = ox.distance.great_circle(
-                lat1=node.latitude, 
-                lon1=node.longitude, 
-                lat2=osm_lat, 
-                lon2=osm_lon
-            )
+            # Собираем пул кандидатов на подключение: первичный узел + его топологические соседи
+            candidate_pool = {primary_id_native}
+            
+            # Добавляем соседей и предшественников (связанные улицы перекрестка)
+            if primary_id_native in road_graph:
+                for neighbor in road_graph.successors(primary_id_native):
+                    candidate_pool.add(int(neighbor))
+                for predecessor in road_graph.predecessors(primary_id_native):
+                    candidate_pool.add(int(predecessor))
 
-            node.nearest_osm_node = node_id_native
-            node.osm_node_lat = osm_lat
-            node.osm_node_lon = osm_lon
-            node.snap_distance_m = round(float(dist_m), 1)
+            # Считаем точные геодезические расстояния от объекта до каждого кандидата
+            candidate_distances = []
+            for cand_id in candidate_pool:
+                if cand_id in road_graph.nodes:
+                    cand_data = road_graph.nodes[cand_id]
+                    c_lat = float(cand_data.get("y"))
+                    c_lon = float(cand_data.get("x"))
+                    d = ox.distance.great_circle(node.latitude, node.longitude, c_lat, c_lon)
+                    candidate_distances.append((cand_id, d, c_lat, c_lon))
+
+            # Сортируем по близости к объекту и берем до 5 лучших кандидатов
+            candidate_distances.sort(key=lambda x: x[1])
+            best_candidates = candidate_distances[:5]
+
+            best_node_id, best_dist, best_lat, best_lon = best_candidates[0]
+
+            node.nearest_osm_node = best_node_id
+            node.osm_node_lat = best_lat
+            node.osm_node_lon = best_lon
+            node.snap_distance_m = round(float(best_dist), 1)
+            node.access_nodes = [item[0] for item in best_candidates]
 
             snapped_nodes.append(node)
-            warning_tag = " [!] ДАЛЕКО" if dist_m > 1000 else ""
-            print(f"  [Snap] '{node.name}' -> узел OSM {node_id_native} (плечо привязки: {node.snap_distance_m} м){warning_tag}")
+            warning_tag = " [!] ДАЛЕКО" if best_dist > 1000 else ""
+            print(f"  [Snap] '{node.name}' -> {len(node.access_nodes)} точек подключения (осн. узел {best_node_id}, плечо: {node.snap_distance_m} м){warning_tag}")
 
         return snapped_nodes

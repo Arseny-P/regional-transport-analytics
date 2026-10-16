@@ -41,6 +41,7 @@ class LogisticsNode:
     osm_node_lat: Optional[float] = None
     osm_node_lon: Optional[float] = None
     snap_distance_m: Optional[float] = None
+    access_nodes: List[int] = field(default_factory=list)  # Пул кандидатов точек подключения (въезды/выезды)
 
     def __getitem__(self, key: str) -> Any:
         if key == "lat":
@@ -74,6 +75,7 @@ class LogisticsNode:
             "osm_node_lat": self.osm_node_lat,
             "osm_node_lon": self.osm_node_lon,
             "snap_distance_m": self.snap_distance_m,
+            "access_nodes": self.access_nodes,
         }
 
 

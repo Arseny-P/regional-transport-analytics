@@ -13,4 +13,5 @@ data/*.graphml
 data/*.geojson
 data/kronshtadt_network.*
 data/central_district.*
+data/shushary_*
 *.png
