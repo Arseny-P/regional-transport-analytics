@@ -1,6 +1,6 @@
 import os
 import json
-from typing import List, Dict, Any, Union, Optional
+from typing import List, Dict, Any, Union, Optional, Tuple
 import networkx as nx
 from shapely.geometry import Point, LineString, MultiLineString, mapping
 from shapely.ops import linemerge
@@ -44,11 +44,14 @@ class LogisticsGraphService:
         self, 
         road_graph: nx.MultiDiGraph, 
         start_nodes: List[int], 
-        end_nodes: List[int]
+        end_nodes: List[int],
+        origin_coords: Optional[Tuple[float, float]] = None,
+        dest_coords: Optional[Tuple[float, float]] = None
     ) -> Dict[str, Any]:
         """
         Находит наилучший (кратчайший) маршрут среди пула кандидатов точек подключения.
         Реализует исследовательский алгоритм find_best_route из ноутбука PM (п. 7.11).
+        Дополнительно выполняет сквозное дотягивание маршрута до центроидов объектов (Last-Mile Access).
         """
         best_distance = float("inf")
         best_u = None
@@ -71,24 +74,63 @@ class LogisticsGraphService:
             return {
                 "status": RouteStatus.NOT_FOUND_IN_DATA.value,
                 "distance_m": None,
+                "total_distance_m": None,
+                "snap_origin_m": None,
+                "snap_dest_m": None,
                 "nodes_count": 0,
                 "path": [],
                 "geom_wkt": None,
+                "road_geom_wkt": None,
                 "access_u": None,
-                "access_v": None
+                "access_v": None,
+                "origin_conn_wkt": None,
+                "dest_conn_wkt": None,
             }
 
         path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=best_u, target=best_v, weight="length")]
         route_geom = self._extract_route_geometry(road_graph, path_nodes)
 
+        import osmnx as ox
+        u_lon = float(road_graph.nodes[best_u]["x"])
+        u_lat = float(road_graph.nodes[best_u]["y"])
+        v_lon = float(road_graph.nodes[best_v]["x"])
+        v_lat = float(road_graph.nodes[best_v]["y"])
+
+        snap_origin_m = 0.0
+        snap_dest_m = 0.0
+        door_to_door_coords = []
+        origin_conn_wkt = None
+        dest_conn_wkt = None
+
+        if origin_coords:
+            snap_origin_m = ox.distance.great_circle(origin_coords[1], origin_coords[0], u_lat, u_lon)
+            door_to_door_coords.append(origin_coords)
+            origin_conn_wkt = LineString([origin_coords, (u_lon, u_lat)]).wkt
+
+        door_to_door_coords.extend(list(route_geom.coords))
+
+        if dest_coords:
+            snap_dest_m = ox.distance.great_circle(v_lat, v_lon, dest_coords[1], dest_coords[0])
+            door_to_door_coords.append(dest_coords)
+            dest_conn_wkt = LineString([(v_lon, v_lat), dest_coords]).wkt
+
+        door_to_door_geom = LineString(door_to_door_coords)
+        total_distance = round(float(best_distance) + snap_origin_m + snap_dest_m, 1)
+
         return {
             "status": RouteStatus.FOUND.value,
             "distance_m": round(float(best_distance), 1),
+            "total_distance_m": total_distance,
+            "snap_origin_m": round(float(snap_origin_m), 1),
+            "snap_dest_m": round(float(snap_dest_m), 1),
             "nodes_count": len(path_nodes),
             "path": path_nodes,
-            "geom_wkt": route_geom.wkt,
+            "geom_wkt": door_to_door_geom.wkt,
+            "road_geom_wkt": route_geom.wkt,
             "access_u": best_u,
-            "access_v": best_v
+            "access_v": best_v,
+            "origin_conn_wkt": origin_conn_wkt,
+            "dest_conn_wkt": dest_conn_wkt,
         }
 
     def build_logistics_graph(
@@ -179,9 +221,18 @@ class LogisticsGraphService:
             if not access_a or not access_b:
                 continue
 
+            coords_a = (node_a.longitude, node_a.latitude)
+            coords_b = (node_b.longitude, node_b.latitude)
+
             # Находим лучший маршрут туда (A -> B) и обратно (B -> A) среди кандидатов
-            route_ab = self._calculate_best_route(road_graph, access_a, access_b)
-            route_ba = self._calculate_best_route(road_graph, access_b, access_a)
+            route_ab = self._calculate_best_route(
+                road_graph, access_a, access_b, 
+                origin_coords=coords_a, dest_coords=coords_b
+            )
+            route_ba = self._calculate_best_route(
+                road_graph, access_b, access_a, 
+                origin_coords=coords_b, dest_coords=coords_a
+            )
 
             has_route_ab = route_ab["status"] == RouteStatus.FOUND.value
             has_route_ba = route_ba["status"] == RouteStatus.FOUND.value
@@ -196,11 +247,17 @@ class LogisticsGraphService:
                 node_b_name=node_b.name,
                 transport_mode=TransportMode.ROAD.value,
                 distance_ab_m=route_ab["distance_m"],
+                total_distance_ab_m=route_ab["total_distance_m"],
+                snap_origin_ab_m=route_ab["snap_origin_m"],
+                snap_dest_ab_m=route_ab["snap_dest_m"],
                 route_status_ab=route_ab["status"],
                 osm_nodes_count_ab=route_ab["nodes_count"],
                 path_osm_nodes_ab=route_ab["path"],
                 geometry_ab_wkt=route_ab["geom_wkt"],
                 distance_ba_m=route_ba["distance_m"],
+                total_distance_ba_m=route_ba["total_distance_m"],
+                snap_origin_ba_m=route_ba["snap_origin_m"],
+                snap_dest_ba_m=route_ba["snap_dest_m"],
                 route_status_ba=route_ba["status"],
                 osm_nodes_count_ba=route_ba["nodes_count"],
                 path_osm_nodes_ba=route_ba["path"],
@@ -209,6 +266,11 @@ class LogisticsGraphService:
             )
 
             edge_dict = edge_obj.to_dict()
+            # Дополнительно сохраняем геометрию подъездных коннекторов для визуализации
+            edge_dict["conn_origin_ab_wkt"] = route_ab.get("origin_conn_wkt") or ""
+            edge_dict["conn_dest_ab_wkt"] = route_ab.get("dest_conn_wkt") or ""
+            edge_dict["conn_origin_ba_wkt"] = route_ba.get("origin_conn_wkt") or ""
+            edge_dict["conn_dest_ba_wkt"] = route_ba.get("dest_conn_wkt") or ""
             clean_attrs = {}
             for k, v in edge_dict.items():
                 if v is None:
@@ -278,6 +340,9 @@ class LogisticsGraphService:
                 }
             })
 
+        # Множество добавленных коннекторов доступа (для исключения дубликатов на карте)
+        added_connectors = set()
+
         for u, v, key, data in log_graph.edges(keys=True, data=True):
             # Линия A -> B
             geom_ab = data.get("geometry_ab_wkt")
@@ -294,8 +359,13 @@ class LogisticsGraphService:
                         "target_id": v,
                         "source_name": data.get("node_a_name", u),
                         "target_name": data.get("node_b_name", v),
-                        "distance_m": data.get("distance_ab_m"),
+                        "road_distance_m": data.get("distance_ab_m"),
+                        "total_distance_m": data.get("total_distance_ab_m") or data.get("distance_ab_m"),
+                        "distance_m": data.get("total_distance_ab_m") or data.get("distance_ab_m"),
+                        "snap_origin_m": data.get("snap_origin_ab_m", 0.0),
+                        "snap_dest_m": data.get("snap_dest_ab_m", 0.0),
                         "osm_nodes_count": data.get("osm_nodes_count_ab"),
+                        "is_door_to_door": True,
                         "title": f"{data.get('node_a_name', u)} → {data.get('node_b_name', v)}"
                     }
                 })
@@ -315,9 +385,55 @@ class LogisticsGraphService:
                         "target_id": u,
                         "source_name": data.get("node_b_name", v),
                         "target_name": data.get("node_a_name", u),
-                        "distance_m": data.get("distance_ba_m"),
+                        "road_distance_m": data.get("distance_ba_m"),
+                        "total_distance_m": data.get("total_distance_ba_m") or data.get("distance_ba_m"),
+                        "distance_m": data.get("total_distance_ba_m") or data.get("distance_ba_m"),
+                        "snap_origin_m": data.get("snap_origin_ba_m", 0.0),
+                        "snap_dest_m": data.get("snap_dest_ba_m", 0.0),
                         "osm_nodes_count": data.get("osm_nodes_count_ba"),
+                        "is_door_to_door": True,
                         "title": f"{data.get('node_b_name', v)} → {data.get('node_a_name', u)}"
+                    }
+                })
+
+            # Пунктирные коннекторы подъезда к дорожной сети (Access Legs / First-Last Mile)
+            conn_origin = data.get("conn_origin_ab_wkt")
+            if conn_origin and conn_origin not in added_connectors:
+                added_connectors.add(conn_origin)
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(wkt.loads(conn_origin)),
+                    "properties": {
+                        "feature_type": "access_connector",
+                        "connector_type": "entry_leg",
+                        "hub_id": u,
+                        "hub_name": data.get("node_a_name", u),
+                        "distance_m": data.get("snap_origin_ab_m", 0.0),
+                        "stroke": "#f59e0b",
+                        "stroke-width": 2,
+                        "stroke-dasharray": "4 4",
+                        "is_dashed": True,
+                        "title": f"Подъезд: {data.get('node_a_name', u)} → Дорога"
+                    }
+                })
+
+            conn_dest = data.get("conn_dest_ab_wkt")
+            if conn_dest and conn_dest not in added_connectors:
+                added_connectors.add(conn_dest)
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(wkt.loads(conn_dest)),
+                    "properties": {
+                        "feature_type": "access_connector",
+                        "connector_type": "exit_leg",
+                        "hub_id": v,
+                        "hub_name": data.get("node_b_name", v),
+                        "distance_m": data.get("snap_dest_ab_m", 0.0),
+                        "stroke": "#f59e0b",
+                        "stroke-width": 2,
+                        "stroke-dasharray": "4 4",
+                        "is_dashed": True,
+                        "title": f"Подъезд: Дорога → {data.get('node_b_name', v)}"
                     }
                 })
 

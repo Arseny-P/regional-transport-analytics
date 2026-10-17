@@ -94,6 +94,9 @@ class LogisticsEdge:
     
     # Направление A -> B
     distance_ab_m: Optional[float] = None
+    total_distance_ab_m: Optional[float] = None
+    snap_origin_ab_m: Optional[float] = None
+    snap_dest_ab_m: Optional[float] = None
     duration_ab_sec: Optional[float] = None
     route_status_ab: str = RouteStatus.NOT_CHECKED.value
     osm_nodes_count_ab: int = 0
@@ -102,6 +105,9 @@ class LogisticsEdge:
     
     # Направление B -> A
     distance_ba_m: Optional[float] = None
+    total_distance_ba_m: Optional[float] = None
+    snap_origin_ba_m: Optional[float] = None
+    snap_dest_ba_m: Optional[float] = None
     duration_ba_sec: Optional[float] = None
     route_status_ba: str = RouteStatus.NOT_CHECKED.value
     osm_nodes_count_ba: int = 0
@@ -118,14 +124,21 @@ class LogisticsEdge:
             "node_b_name": self.node_b_name,
             "transport_mode": self.transport_mode,
             "distance_ab_m": self.distance_ab_m,
+            "total_distance_ab_m": self.total_distance_ab_m,
+            "snap_origin_ab_m": self.snap_origin_ab_m,
+            "snap_dest_ab_m": self.snap_dest_ab_m,
             "duration_ab_sec": self.duration_ab_sec,
             "route_status_ab": self.route_status_ab,
             "osm_nodes_count_ab": self.osm_nodes_count_ab,
             "geometry_ab_wkt": self.geometry_ab_wkt,
             "distance_ba_m": self.distance_ba_m,
+            "total_distance_ba_m": self.total_distance_ba_m,
+            "snap_origin_ba_m": self.snap_origin_ba_m,
+            "snap_dest_ba_m": self.snap_dest_ba_m,
             "duration_ba_sec": self.duration_ba_sec,
             "route_status_ba": self.route_status_ba,
             "osm_nodes_count_ba": self.osm_nodes_count_ba,
             "geometry_ba_wkt": self.geometry_ba_wkt,
             "connection_status": self.connection_status,
         }
+
