@@ -1,0 +1,44 @@
+[
+  {
+    "id": "hub_shushary_armada",
+    "name": "Логистический комплекс «Армада парк»",
+    "lat": 59.8182,
+    "lon": 30.4352,
+    "type": "warehouse"
+  },
+  {
+    "id": "hub_shushary_lenta",
+    "name": "Распределительный центр «Лента»",
+    "lat": 59.8055,
+    "lon": 30.3950,
+    "type": "distribution"
+  },
+  {
+    "id": "hub_shushary_pyaterochka",
+    "name": "Распределительный центр «Пятёрочка» (X5 Group)",
+    "lat": 59.8130,
+    "lon": 30.4070,
+    "type": "distribution"
+  },
+  {
+    "id": "hub_shushary_eurosib",
+    "name": "Контейнерный терминал «Евросиб» (Шушары)",
+    "lat": 59.7992,
+    "lon": 30.3905,
+    "type": "freight"
+  },
+  {
+    "id": "hub_shushary_energo",
+    "name": "Логистический терминал «Энерго»",
+    "lat": 59.8085,
+    "lon": 30.4125,
+    "type": "logistics"
+  },
+  {
+    "id": "hub_shushary_nordway",
+    "name": "Индустриально-логистический парк Nordway",
+    "lat": 59.8160,
+    "lon": 30.4280,
+    "type": "warehouse"
+  }
+]
