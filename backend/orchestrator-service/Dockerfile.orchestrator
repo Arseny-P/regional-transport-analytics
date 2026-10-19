@@ -1,0 +1,16 @@
+FROM golang:1.27.1-alpine AS builder
+
+WORKDIR /app
+
+COPY go.mod  ./
+
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 go build -o /orchestrator ./cmd/app
+
+FROM alpine:3.20
+COPY --from=builder /orchestrator /orchestrator
+COPY --from=builder app/migrations /migrations
+ENTRYPOINT ["/orchestrator"]
