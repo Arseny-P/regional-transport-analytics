@@ -1,0 +1,721 @@
+openapi: 3.1.1
+info:
+  title: Regional Transport Analytics — HTTP API
+  version: 0.1.0-draft
+  description: |
+    Черновик контракта между frontend и Go-бэкендом по issue #25.
+    Реализация обработчиков и внутренние межсервисные сообщения сюда не входят.
+
+    Загрузка региона, асинхронный запуск анализа, статус,
+    heartbeat, отмена в два этапа, получение графа и метрик.
+    Виды транспорта: автомобильный, железнодорожный и морской. Авиации нет.
+
+    Названия путей и полей, HTTP-коды, схемы графа и метрик ниже — рабочие
+    предложения для обсуждения, а не окончательные решения команды.
+    Все примеры данных условные. Лимит файла региона — 20 МБ (20 000 000 байт).
+    Формат файла — GeoJSON FeatureCollection с полигональными границами.
+    Область, выходящая за регион, отклоняется.
+    Heartbeat отправляется каждые 5 секунд и возвращает статус задачи;
+    после 10 секунд без heartbeat запрашивается отмена незавершённой задачи.
+
+x-draft: true
+x-open-questions:
+  - Согласовать формат и объём графа, геометрию рёбер и способ выдачи больших результатов.
+  - Получить от DS список имён метрик, единицы измерения и форматы значений для вершин и рёбер.
+  - Определить срок хранения регионов и результатов, правила доступа и способ очистки. Удаление через 10 минут пока не принято как требование.
+tags:
+  - name: Regions
+    description: Загрузка границы региона.
+  - name: Analysis
+    description: Запуск и жизненный цикл задачи анализа.
+  - name: Results
+    description: Получение результатов конкретной задачи.
+
+paths:
+  /regions:
+    post:
+      tags: [Regions]
+      operationId: uploadRegion
+      summary: Загрузить регион
+      description: |
+        Принимает файл GeoJSON FeatureCollection с границей региона.
+        Максимальный размер самого файла — 20 МБ (20 000 000 байт),
+        без учёта служебных данных multipart.
+        Проверяются корректность JSON, структура FeatureCollection,
+        полигональные геометрии Polygon/MultiPolygon, диапазоны координат
+        и замкнутость контуров. Граница рассматривается как отрезки,
+        соединяющие соседние координаты. Дополнительные проверки
+        самопересечений и внутренних контуров в текущий объём не включены.
+        В Polygon координаты — точки [долгота, широта], соединённые по порядку;
+        последняя точка совпадает с первой, чтобы замкнуть границу.
+        Содержимое разобранного файла описано схемой RegionFeatureCollection.
+        В ответе предлагается возвращать идентификатор и нормализованную
+        границу региона, чтобы frontend мог показать её на карте.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: GeoJSON FeatureCollection; размер файла не более 20 000 000 байт.
+                  x-max-size-bytes: 20000000
+      responses:
+        '201':
+          description: Регион принят и сохранён.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Region'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '413':
+          description: Размер файла превышает 20 МБ (20 000 000 байт).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '415':
+          description: Неподдерживаемый формат содержимого запроса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /analysis:
+    post:
+      tags: [Analysis]
+      operationId: createAnalysis
+      summary: Создать задачу анализа
+      description: |
+        Принимает ссылку на загруженный регион, прямоугольную область
+        по двум противоположным углам и список видов транспорта.
+        Каждый угол задаётся точкой с широтой и долготой.
+        Можно указать автомобильный, железнодорожный и морской транспорт вместе.
+        Область анализа — входные координаты, а не готовый граф.
+        Проверки выполняются до постановки задачи в очередь.
+        Область должна целиком находиться внутри региона: проверяется весь
+        прямоугольник относительно полигональной границы, а не только его углы
+        или ограничивающий прямоугольник региона. При выходе за границу
+        возвращается 422 с кодом area_outside_region; область не обрезается.
+        Ответ не ожидает завершения вычислений.
+
+        Первый запрос отправляется без job_id либо с пустым job_id.
+        Сервер создаёт задачу, назначает ей идентификатор и возвращает его
+        в заголовке X-Job-Id и теле ответа.
+
+        Если непустой job_id уже передан, новая задача не создаётся:
+        сервер возвращает существующую задачу с этим идентификатором.
+        Повторный запуск вычислений не выполняется, исходные параметры не меняются.
+        Если переданный job_id не найден, возвращается 404 без создания задачи.
+
+        Для нового анализа job_id снова не передаётся. Можно повторно
+        использовать region_id без загрузки файла.
+        Два запроса без job_id создают две задачи: защита от повторов здесь
+        работает только после получения идентификатора первого запуска.
+      parameters:
+        - in: query
+          name: job_id
+          required: false
+          description: Пустой или отсутствует — создать задачу; непустой — вернуть существующую без нового запуска.
+          schema:
+            type: string
+      requestBody:
+        required: false
+        description: Обязательно при создании без job_id; при непустом job_id параметры не изменяют существующую задачу.
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAnalysisRequest'
+            example:
+              region_id: region-001
+              area:
+                first_point: {latitude: 59.2, longitude: 30.2}
+                second_point: {latitude: 59.4, longitude: 30.4}
+              transports: [road, rail, sea]
+      responses:
+        '200':
+          description: Возвращена существующая задача; новая не создавалась.
+          headers:
+            X-Job-Id:
+              description: Идентификатор существующей задачи.
+              schema:
+                $ref: '#/components/schemas/Identifier'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisReceipt'
+        '202':
+          description: Новая задача создана и принята к обработке.
+          headers:
+            X-Job-Id:
+              description: Идентификатор новой задачи, назначенный сервером.
+              schema:
+                $ref: '#/components/schemas/Identifier'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisReceipt'
+              example: {job_id: job-001, status: queued}
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /analysis/status:
+    get:
+      tags: [Analysis]
+      operationId: getAnalysisStatus
+      summary: Получить статус задачи
+      description: |
+        Возвращает состояние, текущий этап и доступность результатов.
+        Чтение статуса само не обновляет активность пользователя.
+        Для обычного ожидания frontend использует heartbeat со статусом в ответе;
+        отдельный запрос статуса не требуется на каждом цикле опроса.
+        Ошибка HTTP-запроса статуса не означает, что вычисление завершилось ошибкой.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          $ref: '#/components/responses/JobStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /analysis/heartbeat:
+    post:
+      tags: [Analysis]
+      operationId: sendAnalysisHeartbeat
+      summary: Подтвердить активность пользователя
+      description: |
+        Подтверждает активность пользователя, ожидающего результат задачи.
+        Возвращает текущий статус тем же ответом, включая итоговое состояние.
+        Frontend отправляет запрос каждые 5 секунд, пока ожидает результат.
+
+        Если от пользователя нет heartbeat в течение 10 секунд, сервер
+        запрашивает отмену незавершённой задачи: cancel_requested,
+        затем canceled после подтверждения остановки.
+        Срок отсчитывается на сервере от последнего принятого heartbeat;
+        до первого heartbeat — от принятия задачи.
+        Речь об отсутствии сигналов, а не движений мыши или ввода с клавиатуры.
+        Закрытие вкладки не обнаруживается мгновенно.
+        Heartbeat не возобновляет отменённую или завершённую задачу.
+        Для завершённых задач возвращается текущее состояние без их возобновления.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          $ref: '#/components/responses/JobStatus'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /analysis/cancel:
+    post:
+      tags: [Analysis]
+      operationId: cancelAnalysis
+      summary: Запросить отмену задачи
+      description: |
+        Фиксирует запрос отмены незавершённой задачи и возвращает ответ,
+        не ожидая остановки вычислений.
+        cancel_requested означает «отмена запрошена».
+        canceled появляется в статусе после подтверждения остановки.
+
+        Рабочий вариант для повторов: запрос уже запрошенной отмены возвращает
+        cancel_requested, уже отменённой задачи — canceled.
+        Задачу, уже завершённую до запроса отмены, отменить нельзя.
+        При конкурентной обработке завершения и запроса отмены приоритет
+        имеет отмена. После принятия запроса отмены поздний результат
+        не переводит задачу в completed: ожидается подтверждение остановки,
+        затем состояние canceled.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '202':
+          description: Отмена запрошена; остановка ещё не подтверждена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisStatus'
+              example:
+                job_id: job-001
+                status: cancel_requested
+                stage: graph_building
+                graph_available: false
+                metrics_available: false
+        '200':
+          description: Задача уже отменена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisStatus'
+              example:
+                job_id: job-001
+                status: canceled
+                stage: null
+                graph_available: false
+                metrics_available: false
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /analysis/graph:
+    get:
+      tags: [Results]
+      operationId: getAnalysisGraph
+      summary: Получить граф задачи
+      description: |
+        Результат выбирается по задаче, чтобы разные запуски одной области
+        не смешивались. Построенный граф остаётся доступным при ошибке метрик.
+        Схема вершин и рёбер ниже предварительная; формат больших графов
+        и необходимость выдачи частями ещё не согласованы.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+      responses:
+        '200':
+          description: Построенный граф доступен.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GraphResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ResultUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /analysis/metrics:
+    get:
+      tags: [Results]
+      operationId: getAnalysisMetrics
+      summary: Получить метрики задачи
+      description: |
+        Во время обработки задачи рассчитываются все поддерживаемые метрики.
+        При получении результата frontend выбирает нужные метрики из списка;
+        этот запрос не запускает вычисления заново.
+        Текущая схема значений — предварительный формат числовых метрик всего графа.
+        Состав, единицы измерения, метрики вершин и рёбер нужно согласовать с DS.
+        Необязательный параметр metrics выбирает одну или несколько метрик;
+        без него возвращаются все доступные метрики этого запуска.
+      parameters:
+        - $ref: '#/components/parameters/JobId'
+        - in: query
+          name: metrics
+          required: false
+          description: Список имён выбранных метрик. Передаётся повторением параметра metrics; допустимые имена уточняются с DS.
+          style: form
+          explode: true
+          schema:
+            type: array
+            minItems: 1
+            uniqueItems: true
+            items: {type: string, minLength: 1}
+      responses:
+        '200':
+          description: Рассчитанные метрики доступны.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsResult'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/ResultUnavailable'
+        '422':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  parameters:
+    JobId:
+      in: query
+      name: job_id
+      required: true
+      description: |
+        Идентификатор, назначенный сервером при создании задачи.
+        Используется для статуса, heartbeat, отмены и получения результатов.
+      schema:
+        $ref: '#/components/schemas/Identifier'
+      example: job-001
+
+  responses:
+    JobStatus:
+      description: Текущее состояние задачи.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/AnalysisStatus'
+          example:
+            job_id: job-001
+            status: running
+            stage: metrics_calculation
+            graph_available: true
+            metrics_available: false
+    BadRequest:
+      description: Некорректный формат запроса или отсутствует обязательный параметр.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Регион или задача не найдены.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Действие конфликтует с состоянием задачи.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Недопустимые координаты, область, вид транспорта или параметры анализа.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: area_outside_region
+            message: Выделенная область выходит за границу региона.
+    ResultUnavailable:
+      description: |
+        Результат пока не готов либо не получен из-за ошибки или отмены.
+        Рабочие коды причины — result_not_ready и result_unavailable.
+        Состояние задачи и доступность каждого результата выдаёт ручка статуса.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            code: result_not_ready
+            message: Результат ещё не готов.
+    InternalError:
+      description: Внутренняя ошибка обработки HTTP-запроса без технических подробностей.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Identifier:
+      type: string
+      minLength: 1
+      description: Непрозрачный идентификатор; конкретный формат пока не выбран.
+
+    Region:
+      type: object
+      required: [region_id, boundary]
+      properties:
+        region_id:
+          $ref: '#/components/schemas/Identifier'
+        boundary:
+          $ref: '#/components/schemas/BoundaryGeometry'
+
+    RegionFeatureCollection:
+      type: object
+      description: |
+        Содержимое загружаемого GeoJSON-файла после разбора.
+        Принимается непустая FeatureCollection с полигональными геометриями.
+        Геометрии проверяются по координатам и отрезкам контуров.
+        FeatureCollection — оболочка со списком Feature. Каждый Feature
+        содержит полигональную геометрию и атрибуты; геометрии задают регион.
+      required: [type, features]
+      properties:
+        type: {type: string, const: FeatureCollection}
+        features:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/RegionFeature'
+      example:
+        type: FeatureCollection
+        features:
+          - type: Feature
+            properties: {}
+            geometry:
+              type: Polygon
+              coordinates:
+                - [[30, 59], [31, 59], [31, 60], [30, 60], [30, 59]]
+
+    RegionFeature:
+      type: object
+      required: [type, geometry, properties]
+      properties:
+        type: {type: string, const: Feature}
+        geometry:
+          $ref: '#/components/schemas/BoundaryGeometry'
+        properties:
+          type: [object, 'null']
+          additionalProperties: true
+          description: Атрибуты GeoJSON Feature; обязательные предметные поля пока не заданы.
+
+    Position:
+      type: array
+      description: Двумерная позиция в порядке GeoJSON — [долгота, широта].
+      minItems: 2
+      maxItems: 2
+      prefixItems:
+        - {type: number, minimum: -180, maximum: 180}
+        - {type: number, minimum: -90, maximum: 90}
+      items: false
+      example: [30.3, 59.3]
+
+    LinearRing:
+      type: array
+      minItems: 4
+      description: |
+        Замкнутый контур. Первая и последняя позиции должны совпадать;
+        это требует проверки геометрии сверх описанных здесь ограничений схемы.
+      items:
+        $ref: '#/components/schemas/Position'
+
+    PolygonCoordinates:
+      type: array
+      minItems: 1
+      description: Внешний контур и, при наличии, внутренние контуры.
+      items:
+        $ref: '#/components/schemas/LinearRing'
+
+    BoundaryGeometry:
+      description: Полигональная геометрия Feature и нормализованная граница региона.
+      oneOf:
+        - type: object
+          required: [type, coordinates]
+          properties:
+            type: {type: string, const: Polygon}
+            coordinates:
+              $ref: '#/components/schemas/PolygonCoordinates'
+        - type: object
+          required: [type, coordinates]
+          properties:
+            type: {type: string, const: MultiPolygon}
+            coordinates:
+              type: array
+              minItems: 1
+              items:
+                $ref: '#/components/schemas/PolygonCoordinates'
+      example:
+        type: Polygon
+        coordinates:
+          - [[30, 59], [31, 59], [31, 60], [30, 60], [30, 59]]
+
+    AnalysisArea:
+      type: object
+      description: |
+        Две точки — противоположные углы прямоугольника, выделенного мышкой.
+        Например, first_point — точка начала выделения, second_point — конца.
+        Порядок углов не важен: backend определяет границы по координатам.
+        Широты точек и долготы точек должны различаться, чтобы площадь была ненулевой.
+        Область не пересекает антимеридиан.
+        Проверяется попадание всей области в полигональную границу региона.
+        Если хотя бы часть выходит за границу, запрос отклоняется с ошибкой 422
+        area_outside_region. Автоматическое обрезание области не выполняется.
+      required: [first_point, second_point]
+      properties:
+        first_point:
+          $ref: '#/components/schemas/MapPoint'
+        second_point:
+          $ref: '#/components/schemas/MapPoint'
+
+    MapPoint:
+      type: object
+      description: Точка выделения на карте с явно названными широтой и долготой.
+      required: [latitude, longitude]
+      properties:
+        latitude: {type: number, minimum: -90, maximum: 90}
+        longitude: {type: number, minimum: -180, maximum: 180}
+      example: {latitude: 59.2, longitude: 30.2}
+
+    Transport:
+      type: string
+      enum: [road, rail, sea]
+      description: |
+        Виды транспорта: автомобильный (наземный), железнодорожный и морской.
+        Авиация не рассматривается. Подтверждённые обозначения — road, rail, sea.
+
+    Transports:
+      type: array
+      minItems: 1
+      maxItems: 3
+      uniqueItems: true
+      description: |
+        Список видов транспорта для задачи. Можно передать все три вида вместе;
+        поле не ограничивает задачу одним видом транспорта.
+      items:
+        $ref: '#/components/schemas/Transport'
+      example: [road, rail, sea]
+
+    CreateAnalysisRequest:
+      type: object
+      required: [region_id, area, transports]
+      properties:
+        region_id:
+          $ref: '#/components/schemas/Identifier'
+        area:
+          $ref: '#/components/schemas/AnalysisArea'
+        transports:
+          $ref: '#/components/schemas/Transports'
+
+    JobState:
+      type: string
+      enum: [queued, running, cancel_requested, canceled, completed, failed]
+      description: |
+        Рабочие имена состояний: очередь, выполнение, отмена запрошена,
+        отменено, завершено, ошибка. Точная машина переходов требует согласования.
+        cancel_requested не означает подтверждённую остановку.
+
+    AnalysisStage:
+      type: [string, 'null']
+      enum: [graph_building, metrics_calculation, null]
+      description: |
+        Построение графа либо расчёт метрик. null — активного этапа нет.
+        Конкретный набор этапов и поведение после ошибки пока предварительные.
+
+    AnalysisReceipt:
+      type: object
+      required: [job_id, status]
+      properties:
+        job_id:
+          $ref: '#/components/schemas/Identifier'
+        status:
+          $ref: '#/components/schemas/JobState'
+
+    AnalysisStatus:
+      type: object
+      required: [job_id, status, stage, graph_available, metrics_available]
+      properties:
+        job_id:
+          $ref: '#/components/schemas/Identifier'
+        status:
+          $ref: '#/components/schemas/JobState'
+        stage:
+          $ref: '#/components/schemas/AnalysisStage'
+        graph_available:
+          type: boolean
+          description: Можно ли получить граф этой задачи.
+        metrics_available:
+          type: boolean
+          description: Можно ли получить метрики этой задачи.
+        error:
+          description: Ошибка выполнения задачи; этап указан в stage ошибки.
+          allOf:
+            - $ref: '#/components/schemas/AnalysisFailure'
+
+    AnalysisFailure:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: string}
+        message: {type: string}
+        stage:
+          $ref: '#/components/schemas/AnalysisStage'
+
+    GraphResult:
+      type: object
+      x-draft: true
+      description: |
+        Набросок формата графа для обсуждения с frontend.
+        Идентификаторы, атрибуты, направленность и геометрию связей нужно согласовать.
+      required: [job_id, nodes, edges]
+      properties:
+        job_id:
+          $ref: '#/components/schemas/Identifier'
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [id, position]
+            properties:
+              id:
+                $ref: '#/components/schemas/Identifier'
+              position:
+                $ref: '#/components/schemas/Position'
+              attributes:
+                type: object
+                additionalProperties: true
+        edges:
+          type: array
+          items:
+            type: object
+            required: [id, source, target]
+            properties:
+              id:
+                $ref: '#/components/schemas/Identifier'
+              source:
+                type: string
+                description: Идентификатор начальной вершины из nodes.
+              target:
+                type: string
+                description: Идентификатор конечной вершины из nodes.
+              geometry:
+                type: array
+                minItems: 2
+                description: Предварительная геометрия маршрута; без неё вид связи нужно согласовать.
+                items:
+                  $ref: '#/components/schemas/Position'
+              attributes:
+                type: object
+                additionalProperties: true
+
+    MetricsResult:
+      type: object
+      x-draft: true
+      description: |
+        Временный формат числовых метрик всего графа.
+        При обработке задачи считаются все поддерживаемые метрики,
+        а при выдаче возвращаются выбранные через metrics или все, если фильтра нет.
+        Не фиксирует окончательный состав метрик, единицы и метрики элементов графа.
+      required: [job_id, values]
+      properties:
+        job_id:
+          $ref: '#/components/schemas/Identifier'
+        values:
+          type: object
+          description: Выбранные имена метрик и их числовые значения; перечень имён согласуется с DS.
+          additionalProperties:
+            type: number
+
+    Error:
+      type: object
+      description: Предварительный единый формат ошибок HTTP API.
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Машиночитаемый код; перечень нужно согласовать.
+        message:
+          type: string
+          description: Понятная причина ошибки без секретов и внутренних трассировок.
+        field:
+          type: string
+          description: Поле запроса, если ошибка относится к конкретному полю.
