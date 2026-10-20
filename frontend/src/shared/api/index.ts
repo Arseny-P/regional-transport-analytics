@@ -1,2 +1,10 @@
 export { ApiError, bboxToQuery, buildUrl, request } from './client';
-export type { ApiErrorBody, BBoxTuple, QueryParams } from './types';
+export type {
+  AnalyzeResponseDto,
+  ApiErrorBody,
+  BBoxTuple,
+  LogisticsPointDto,
+  MetricsResponseDto,
+  MstEdgeDto,
+  QueryParams,
+} from './types';
