@@ -21,6 +21,84 @@ class VerificationStatus(str, Enum):
     EXCLUDED = "excluded"
 
 
+class TerritoryValidationError(ValueError):
+    """Ошибка валидации географических координат или границ исследуемой территории."""
+    pass
+
+
+class FacilityValidationError(ValueError):
+    """Ошибка валидации данных логистического объекта."""
+    pass
+
+
+@dataclass
+class TerritoryBounds:
+    """
+    Географические границы исследуемой территории (Bounding Box).
+    Координаты задаются в градусах WGS84 (EPSG:4326).
+    """
+    min_lat: float
+    min_lon: float
+    max_lat: float
+    max_lon: float
+
+    def validate(self, max_lat_span: float = 2.0, max_lon_span: float = 2.0) -> None:
+        """
+        Проверяет корректность диапазонов координат, логику min < max и лимиты площади.
+        """
+        if not (-90.0 <= self.min_lat <= 90.0 and -90.0 <= self.max_lat <= 90.0):
+            raise TerritoryValidationError(
+                f"Широта (lat) должна быть в диапазоне [-90, 90]. Получено: min_lat={self.min_lat}, max_lat={self.max_lat}"
+            )
+        if not (-180.0 <= self.min_lon <= 180.0 and -180.0 <= self.max_lon <= 180.0):
+            raise TerritoryValidationError(
+                f"Долгота (lon) должна быть в диапазоне [-180, 180]. Получено: min_lon={self.min_lon}, max_lon={self.max_lon}"
+            )
+        if self.min_lat >= self.max_lat:
+            raise TerritoryValidationError(
+                f"min_lat ({self.min_lat}) должен быть строго меньше max_lat ({self.max_lat})."
+            )
+        if self.min_lon >= self.max_lon:
+            raise TerritoryValidationError(
+                f"min_lon ({self.min_lon}) должен быть строго меньше max_lon ({self.max_lon})."
+            )
+
+        lat_span = self.max_lat - self.min_lat
+        lon_span = self.max_lon - self.min_lon
+        if lat_span > max_lat_span or lon_span > max_lon_span:
+            raise TerritoryValidationError(
+                f"Размер исследуемой территории превышает допустимый лимит: "
+                f"delta_lat={lat_span:.3f}° (макс {max_lat_span}°), delta_lon={lon_span:.3f}° (макс {max_lon_span}°). "
+                f"Пожалуйста, сузьте границы bbox для предотвращения перегрузки памяти и Overpass API."
+            )
+
+    def to_osmnx_bbox(self) -> tuple[float, float, float, float]:
+        """
+        Возвращает кортеж в формате OSMnx 2.x: (left, bottom, right, top) -> (min_lon, min_lat, max_lon, max_lat).
+        """
+        return (self.min_lon, self.min_lat, self.max_lon, self.max_lat)
+
+    def contains(self, lat: float, lon: float) -> bool:
+        """
+        Проверяет, попадает ли точка (lat, lon) внутрь границ территории.
+        """
+        return self.min_lat <= lat <= self.max_lat and self.min_lon <= lon <= self.max_lon
+
+    def cache_key(self) -> str:
+        """
+        Формирует детерминированный строковый ключ для кэширования файлов.
+        """
+        return f"bbox_{self.min_lat:.4f}_{self.min_lon:.4f}_{self.max_lat:.4f}_{self.max_lon:.4f}"
+
+    def to_dict(self) -> Dict[str, float]:
+        return {
+            "min_lat": self.min_lat,
+            "min_lon": self.min_lon,
+            "max_lat": self.max_lat,
+            "max_lon": self.max_lon,
+        }
+
+
 @dataclass
 class LogisticsNode:
     """

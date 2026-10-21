@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
 import geopandas as gpd
+from models import TerritoryBounds, TerritoryValidationError
 
 # Настройки OSMnx по умолчанию
 ox.settings.log_console = False
@@ -19,6 +20,35 @@ class RoadNetworkService:
     def __init__(self, storage_dir: str = "data"):
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
+
+    def fetch_and_build_from_bbox(
+        self,
+        bbox: TerritoryBounds,
+        network_type: str = "drive",
+        simplify: bool = True,
+    ) -> nx.MultiDiGraph:
+        """
+        Загружает автомобильную дорожную сеть из OSM для заданного BBox (TerritoryBounds).
+        Использует формат OSMnx 2.x (left, bottom, right, top) -> (min_lon, min_lat, max_lon, max_lat).
+        """
+        bbox.validate()
+        print(f"[*] Загрузка данных дорожной сети OSM по BBox: "
+              f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
+
+        try:
+            graph = ox.graph_from_bbox(
+                bbox=bbox.to_osmnx_bbox(),
+                network_type=network_type,
+                simplify=simplify,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Ошибка загрузки дорожной сети OSM для указанного BBox: {e}") from e
+
+        if len(graph.nodes) == 0:
+            raise ValueError(f"Дорожная сеть для указанного BBox пуста. Проверьте координаты территории.")
+
+        print(f"[+] Дорожная сеть построена по BBox: {len(graph.nodes)} вершин, {len(graph.edges)} ребер.")
+        return graph
 
     def fetch_and_build(
         self, 
