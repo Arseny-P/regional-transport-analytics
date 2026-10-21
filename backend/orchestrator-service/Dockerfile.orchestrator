@@ -8,9 +8,9 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 go build -o /orchestrator ./cmd/app
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /orchestrator ./cmd/app
 
-FROM alpine:3.20
+FROM alpine:3.23
 COPY --from=builder /orchestrator /orchestrator
 COPY --from=builder app/migrations /migrations
 ENTRYPOINT ["/orchestrator"]

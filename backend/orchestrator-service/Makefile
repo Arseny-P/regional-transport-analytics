@@ -1,29 +1,54 @@
-LOCAL_BIN := $(CURDIR)/bin
-GOLANGCI_LINT:=$(LOCAL_BIN)/golangci-lint
-
-export GOBIN := $(LOCAL_BIN)
-
-bin-deps:
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest
+BIN := $(CURDIR)/bin
 
 
-govet:
+
+ENV_FILE ?= ../../.env
+
+# Читать локальные настройки и передавать их запускаемым программам.
+# Если .env отсутствует (например, в CI), продолжать без него.
+-include $(ENV_FILE)
+export
+
+export GOBIN := $(BIN)
+
+
+.PHONY: run build tools fmt fmt-check vet lint test migrate-up migrate-down migrate-status
+
+run:
+	go run ./cmd/app
+
+build:
+	go build -o bin/orchestrator$(EXE) ./cmd/app
+
+tools:
+	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
+	go install github.com/pressly/goose/v3/cmd/goose@v3.26.0
+
+fmt:
+	gofmt -w cmd config internal
+
+fmt-check:
+	@files="$$(gofmt -l cmd config internal)" || exit $$?; \
+	if [ -n "$$files" ]; then \
+		printf '%s\n' "$$files"; \
+		exit 1; \
+	fi
+
+vet:
 	go vet ./...
 
-golint:
-	$(GOLANGCI_LINT) run ./...
-	
-
-
+lint:
+	"$(BIN)/golangci-lint$(EXE)" run ./...
 tidy:
 	go mod tidy
-
 test:
-	go test -v -race -timeout 60s ./...
+	go test -race -timeout 60s ./...
 
+migrate-up:
+	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations up
 
-cover:
-	go test -coverprofile=coverage.out ./...
-	go tool cover -func=coverage.out
+migrate-down:
+	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations down
 
-.PHONY: bin-deps buf-generate generate tidy test cover
+migrate-status:
+	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations status
