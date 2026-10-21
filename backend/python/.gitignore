@@ -1,0 +1,17 @@
+venv/
+.venv/
+__pycache__/
+cache/
+.DS_Store
+PM-research/
+
+CONTEXT.md
+PYTHON_GRAPH_SERVICE_STRUCTURE.md
+
+# Ignore generated heavy graphs, but keep sample test data
+data/*.graphml
+data/*.geojson
+data/kronshtadt_network.*
+data/central_district.*
+data/shushary_*
+*.png
