@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Layout } from '@/widgets/layout';
+import { AppSidebar } from '@/widgets/app-layout';
 
 export default function ResultPage() {
   const location = useLocation();
@@ -163,66 +163,65 @@ export default function ResultPage() {
 
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <Layout sidebarContent={sidebarContent}>
-        <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-          {mapSrc && (
-            <>
-              {loading && (
+      <AppSidebar>{sidebarContent}</AppSidebar>
+      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
+        {mapSrc && (
+          <>
+            {loading && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  height: '100%',
+                  display: 'flex',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  backgroundColor: 'rgba(255,255,255,0.8)',
+                  zIndex: 1000,
+                  flexDirection: 'column',
+                }}
+              >
                 <div
                   style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    width: '100%',
-                    height: '100%',
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    backgroundColor: 'rgba(255,255,255,0.8)',
-                    zIndex: 1000,
-                    flexDirection: 'column',
+                    border: '6px solid #f3f3f3',
+                    borderTop: '6px solid #0f62fe',
+                    borderRadius: '50%',
+                    width: '50px',
+                    height: '50px',
+                    animation: 'spin 1s linear infinite',
+                    marginBottom: '12px',
                   }}
-                >
-                  <div
-                    style={{
-                      border: '6px solid #f3f3f3',
-                      borderTop: '6px solid #0f62fe',
-                      borderRadius: '50%',
-                      width: '50px',
-                      height: '50px',
-                      animation: 'spin 1s linear infinite',
-                      marginBottom: '12px',
-                    }}
-                  ></div>
-                  <style>{`
+                ></div>
+                <style>{`
                                         @keyframes spin {
                                             0% { transform: rotate(0deg); }
                                             100% { transform: rotate(360deg); }
                                         }
                                     `}</style>
-                  <span
-                    style={{
-                      fontSize: '16px',
-                      fontWeight: 'bold',
-                      color: '#0f62fe',
-                    }}
-                  >
-                    Загрузка карты...
-                  </span>
-                </div>
-              )}
+                <span
+                  style={{
+                    fontSize: '16px',
+                    fontWeight: 'bold',
+                    color: '#0f62fe',
+                  }}
+                >
+                  Загрузка карты...
+                </span>
+              </div>
+            )}
 
-              <iframe
-                key={mapKey}
-                src={mapSrc}
-                title="Map"
-                style={{ width: '100%', height: '100%', border: 'none' }}
-                onLoad={() => setLoading(false)}
-              />
-            </>
-          )}
-        </div>
-      </Layout>
+            <iframe
+              key={mapKey}
+              src={mapSrc}
+              title="Map"
+              style={{ width: '100%', height: '100%', border: 'none' }}
+              onLoad={() => setLoading(false)}
+            />
+          </>
+        )}
+      </div>
     </div>
   );
 }
