@@ -220,3 +220,111 @@ class LogisticsEdge:
             "connection_status": self.connection_status,
         }
 
+
+class TerritorySourceType(str, Enum):
+    BBOX = "bbox"
+    PLACE_NAME = "place_name"
+
+
+class FacilitySourceType(str, Enum):
+    USER_DEFINED = "user_defined"
+    OSM = "osm"
+    HYBRID = "hybrid"
+
+
+class AnalysisStatus(str, Enum):
+    SUCCESS = "success"
+    PARTIAL_SUCCESS = "partial_success"
+    ERROR = "error"
+
+
+@dataclass
+class AnalysisRequest:
+    """
+    Входные параметры для запуска анализа территории.
+    Используется в качестве контракта при вызове из Go-бэкенда.
+    """
+    territory_type: str = TerritorySourceType.BBOX.value
+    bbox: Optional[TerritoryBounds] = None
+    place_name: Optional[str] = None
+    which_result: Optional[int] = None
+
+    facility_source: str = FacilitySourceType.USER_DEFINED.value
+    facilities: List[Dict[str, Any]] = field(default_factory=list)
+    osm_facilities_limit: int = 15
+    osm_tags: Optional[Dict[str, Any]] = None
+
+    knn: Optional[int] = None
+    output_dir: str = "data"
+    output_alias: Optional[str] = None
+    save_artifacts: bool = True
+    include_geojson_payload: bool = True
+    refetch: bool = False
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "AnalysisRequest":
+        bbox_data = data.get("bbox")
+        bbox_obj = None
+        if isinstance(bbox_data, dict):
+            bbox_obj = TerritoryBounds(
+                min_lat=float(bbox_data["min_lat"]),
+                min_lon=float(bbox_data["min_lon"]),
+                max_lat=float(bbox_data["max_lat"]),
+                max_lon=float(bbox_data["max_lon"]),
+            )
+        elif isinstance(bbox_data, (list, tuple)) and len(bbox_data) == 4:
+            # Поддержка формата [min_lat, min_lon, max_lat, max_lon]
+            bbox_obj = TerritoryBounds(
+                min_lat=float(bbox_data[0]),
+                min_lon=float(bbox_data[1]),
+                max_lat=float(bbox_data[2]),
+                max_lon=float(bbox_data[3]),
+            )
+
+        return cls(
+            territory_type=str(data.get("territory_type", TerritorySourceType.BBOX.value)),
+            bbox=bbox_obj,
+            place_name=data.get("place_name"),
+            which_result=data.get("which_result"),
+            facility_source=str(data.get("facility_source", FacilitySourceType.USER_DEFINED.value)),
+            facilities=data.get("facilities", []),
+            osm_facilities_limit=int(data.get("osm_facilities_limit", 15)),
+            osm_tags=data.get("osm_tags"),
+            knn=int(data["knn"]) if data.get("knn") is not None else None,
+            output_dir=str(data.get("output_dir", "data")),
+            output_alias=data.get("output_alias"),
+            save_artifacts=bool(data.get("save_artifacts", True)),
+            include_geojson_payload=bool(data.get("include_geojson_payload", True)),
+            refetch=bool(data.get("refetch", False)),
+        )
+
+
+@dataclass
+class AnalysisResponse:
+    """
+    Структурированный результат выполнения анализа для передачи в Go-бэкенд.
+    """
+    status: str = AnalysisStatus.SUCCESS.value
+    territory: Dict[str, Any] = field(default_factory=dict)
+    summary: Dict[str, Any] = field(default_factory=dict)
+    artifacts: Dict[str, Optional[str]] = field(default_factory=dict)
+    hubs: List[Dict[str, Any]] = field(default_factory=list)
+    connections: List[Dict[str, Any]] = field(default_factory=list)
+    geojson: Optional[Dict[str, Any]] = None
+    warnings: List[str] = field(default_factory=list)
+    error_message: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "status": self.status,
+            "territory": self.territory,
+            "summary": self.summary,
+            "artifacts": self.artifacts,
+            "hubs": self.hubs,
+            "connections": self.connections,
+            "geojson": self.geojson,
+            "warnings": self.warnings,
+            "error_message": self.error_message,
+        }
+
+
