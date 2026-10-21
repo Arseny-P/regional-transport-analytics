@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import Layout from '../layout/Layout';
+import { Layout } from '@/widgets/layout';
 
 export default function ResultPage() {
   const location = useLocation();

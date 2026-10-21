@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Layout from '../layout/Layout';
+import { Layout } from '@/widgets/layout';
 import { MapView } from '@/widgets/map-view';
 
 export default function AnalysisPage() {
