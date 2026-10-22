@@ -138,12 +138,13 @@ def main():
     seed_points_file: Optional[str] = None
 
     if args.bbox:
+        min_lat, min_lon, max_lat, max_lon = args.bbox
         territory_type = TerritorySourceType.BBOX.value
         bbox_obj = TerritoryBounds(
-            min_lat=args.bbox[0],
-            min_lon=args.bbox[1],
-            max_lat=args.bbox[2],
-            max_lon=args.bbox[3],
+            min_lat=min_lat,
+            min_lon=min_lon,
+            max_lat=max_lat,
+            max_lon=max_lon,
         )
         output_alias = bbox_obj.cache_key()
         area_title = f"BBox (lat: [{bbox_obj.min_lat}, {bbox_obj.max_lat}], lon: [{bbox_obj.min_lon}, {bbox_obj.max_lon}])"

@@ -62,22 +62,22 @@ python -m unittest discover tests
 
 Код разделен на независимые сервисы по принципу единственной ответственности (SRP):
 
-* [`services/territory_analysis_service.py`](file:///Users/kiryakhamentry/Desktop/Coding/Project/regional-transport-analytics/backend/python/services/territory_analysis_service.py) — **`TerritoryAnalysisService`**:
+* [`services/territory_analysis_service.py`] — **`TerritoryAnalysisService`**:
   * Вызываемый оркестратор полного цикла анализа (`run_analysis`), контрактная интеграция с Go-бэкендом (`AnalysisRequest` ➔ `AnalysisResponse`).
-* [`services/road_network_service.py`](file:///Users/kiryakhamentry/Desktop/Coding/Project/regional-transport-analytics/backend/python/services/road_network_service.py) — **`RoadNetworkService`**:
+* [`services/road_network_service.py`] — **`RoadNetworkService`**:
   * Загрузка дорожной сети OSM по названию территории (`fetch_and_build`) и по произвольному BBox (`fetch_and_build_from_bbox`) в формате OSMnx 2.x.
   * Сохранение и оффлайн-загрузка графа дорог (`save_graphml`, `load_graphml`).
   * Экспорт дорожного слоя в GeoJSON (`export_to_geojson`).
-* [`services/facility_service.py`](file:///Users/kiryakhamentry/Desktop/Coding/Project/regional-transport-analytics/backend/python/services/facility_service.py) — **`FacilityService`**:
+* [`services/facility_service.py`] — **`FacilityService`**:
   * Парсинг и строгая валидация пользовательских объектов (`parse_and_validate_facilities`).
   * Автопоиск объектов в OSM по BBox (`fetch_from_osm_bbox`) и названию (`fetch_from_osm`).
   * Многоточечная привязка (Multi-point Snapping до 5 кандидатов) к узлам дорожной сети (`snap_to_road_network`).
-* [`services/logistics_graph_service.py`](file:///Users/kiryakhamentry/Desktop/Coding/Project/regional-transport-analytics/backend/python/services/logistics_graph_service.py) — **`LogisticsGraphService`**:
+* [`services/logistics_graph_service.py`] — **`LogisticsGraphService`**:
   * Расчет кратчайших автомобильных путей Door-to-Door и синтез логистического MultiGraph (`build_logistics_graph`).
   * Разреживание графа методом k-NN (`k_neighbors`).
   * Склейка геометрии дорог и генерация пунктирных коннекторов последней мили (`access_connector`).
   * Сериализация в GraphML и экспорт в GeoJSON (`save_graphml`, `export_to_geojson`).
-* [`graph_service.py`](file:///Users/kiryakhamentry/Desktop/Coding/Project/regional-transport-analytics/backend/python/graph_service.py) — **`GraphService`**:
+* [`graph_service.py`] — **`GraphService`**:
   * Фасад (Facade) для обратной совместимости, объединяющий все сервисы под единым интерфейсом.
 
 
