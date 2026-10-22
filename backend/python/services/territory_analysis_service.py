@@ -246,6 +246,7 @@ class TerritoryAnalysisService:
                 "node_b_name": data.get("node_b_name"),
                 "transport_mode": data.get("transport_mode", "road"),
                 "route_status_ab": status_ab,
+                "route_status_ba": status_ba,
                 "distance_ab_km": round(float(data.get("distance_ab_m", 0.0)) / 1000.0, 3) if data.get("distance_ab_m") is not None else None,
                 "distance_ba_km": round(float(data.get("distance_ba_m", 0.0)) / 1000.0, 3) if data.get("distance_ba_m") is not None else None,
                 "total_distance_ab_km": round(float(data.get("total_distance_ab_m", 0.0)) / 1000.0, 3) if data.get("total_distance_ab_m") is not None else None,
