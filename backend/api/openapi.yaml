@@ -6,8 +6,8 @@ info:
     Черновик контракта между frontend и Go-бэкендом по issue #25.
     Реализация обработчиков и внутренние межсервисные сообщения сюда не входят.
 
-    Загрузка региона, асинхронный запуск анализа, статус,
-    heartbeat, отмена в два этапа, получение графа и метрик.
+    Загрузка региона, асинхронный запуск анализа, heartbeat со статусом,
+    отмена в два этапа, получение графа и метрик одним ответом.
     Виды транспорта: автомобильный, железнодорожный и морской. Авиации нет.
 
     Названия путей и полей, HTTP-коды, схемы графа и метрик ниже — рабочие
@@ -17,12 +17,8 @@ info:
     Область, выходящая за регион, отклоняется.
     Heartbeat отправляется каждые 5 секунд и возвращает статус задачи;
     после 10 секунд без heartbeat запрашивается отмена незавершённой задачи.
+    Сроки хранения и автоматическая очистка данных пока не определены.
 
-x-draft: true
-x-open-questions:
-  - Согласовать формат и объём графа, геометрию рёбер и способ выдачи больших результатов.
-  - Получить от DS список имён метрик, единицы измерения и форматы значений для вершин и рёбер.
-  - Определить срок хранения регионов и результатов, правила доступа и способ очистки. Удаление через 10 минут пока не принято как требование.
 tags:
   - name: Regions
     description: Загрузка границы региона.
@@ -174,38 +170,20 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /analysis/status:
-    get:
-      tags: [Analysis]
-      operationId: getAnalysisStatus
-      summary: Получить статус задачи
-      description: |
-        Возвращает состояние, текущий этап и доступность результатов.
-        Чтение статуса само не обновляет активность пользователя.
-        Для обычного ожидания frontend использует heartbeat со статусом в ответе;
-        отдельный запрос статуса не требуется на каждом цикле опроса.
-        Ошибка HTTP-запроса статуса не означает, что вычисление завершилось ошибкой.
-      parameters:
-        - $ref: '#/components/parameters/JobId'
-      responses:
-        '200':
-          $ref: '#/components/responses/JobStatus'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '500':
-          $ref: '#/components/responses/InternalError'
-
   /analysis/heartbeat:
     post:
       tags: [Analysis]
       operationId: sendAnalysisHeartbeat
-      summary: Подтвердить активность пользователя
+      summary: Подтвердить активность пользователя и получить статус задачи
       description: |
         Подтверждает активность пользователя, ожидающего результат задачи.
-        Возвращает текущий статус тем же ответом, включая итоговое состояние.
-        Frontend отправляет запрос каждые 5 секунд, пока ожидает результат.
+        Возвращает состояние, доступность результатов и ошибку,
+        если она есть, тем же ответом, включая итоговое состояние.
+        Frontend автоматически отправляет запрос каждые 5 секунд,
+        пока задача не перешла в completed, failed или canceled.
+        Пользователю не нужно вручную запрашивать статус.
+        Отдельной ручки статуса нет.
+        Ошибка HTTP-запроса heartbeat сама по себе не означает ошибку вычислений.
 
         Если от пользователя нет heartbeat в течение 10 секунд, сервер
         запрашивает отмену незавершённой задачи: cancel_requested,
@@ -258,7 +236,6 @@ paths:
               example:
                 job_id: job-001
                 status: cancel_requested
-                stage: graph_building
                 graph_available: false
                 metrics_available: false
         '200':
@@ -270,7 +247,6 @@ paths:
               example:
                 job_id: job-001
                 status: canceled
-                stage: null
                 graph_available: false
                 metrics_available: false
         '400':
@@ -282,75 +258,88 @@ paths:
         '500':
           $ref: '#/components/responses/InternalError'
 
-  /analysis/graph:
+  /analysis/result:
     get:
       tags: [Results]
-      operationId: getAnalysisGraph
-      summary: Получить граф задачи
+      operationId: getAnalysisResult
+      summary: Получить граф, метрики и состояние задачи одним ответом
       description: |
         Результат выбирается по задаче, чтобы разные запуски одной области
-        не смешивались. Построенный граф остаётся доступным при ошибке метрик.
-        Схема вершин и рёбер ниже предварительная; формат больших графов
-        и необходимость выдачи частями ещё не согласованы.
-      parameters:
-        - $ref: '#/components/parameters/JobId'
-      responses:
-        '200':
-          description: Построенный граф доступен.
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/GraphResult'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/ResultUnavailable'
-        '500':
-          $ref: '#/components/responses/InternalError'
+        не смешивались. Один ответ содержит состояние задачи, граф и все
+        рассчитанные метрики. Выбора метрик в запросе нет.
+        Граф в поле graph возвращается списками вершин nodes и рёбер edges.
+        Вершина содержит id и координаты, ребро — id и идентификаторы
+        начальной и конечной вершин source и target.
 
-  /analysis/metrics:
-    get:
-      tags: [Results]
-      operationId: getAnalysisMetrics
-      summary: Получить метрики задачи
-      description: |
-        Во время обработки задачи рассчитываются все поддерживаемые метрики.
-        При получении результата frontend выбирает нужные метрики из списка;
-        этот запрос не запускает вычисления заново.
-        Текущая схема значений — предварительный формат числовых метрик всего графа.
-        Состав, единицы измерения, метрики вершин и рёбер нужно согласовать с DS.
-        Необязательный параметр metrics выбирает одну или несколько метрик;
-        без него возвращаются все доступные метрики этого запуска.
+        Пока граф не построен, graph равен null. Готовый граф возвращается,
+        даже если метрики ещё считаются или их расчёт завершился ошибкой.
+        В metrics передаётся массив всех рассчитанных метрик.
+        Каждый элемент содержит name и value с числовым значением float.
+        Метрики без рассчитанного значения не включаются в массив.
+        Если значений нет, metrics равен []. Пустой массив сам по себе
+        не означает ошибку: frontend проверяет status и error.
+
+        Для существующей задачи возвращается HTTP 200, в том числе пока
+        она выполняется, при ошибке вычислений или отмене. Ошибка вычислений
+        описывается полем error с кодом и сообщением. HTTP 500 означает ошибку
+        обработки самого запроса результата.
+        Чтение результата не обновляет heartbeat и не запускает вычисления заново.
+        Граф и метрики возвращаются целиком без разбиения на страницы.
+        Конкретный список показателей не ограничивается примерами в контракте.
       parameters:
         - $ref: '#/components/parameters/JobId'
-        - in: query
-          name: metrics
-          required: false
-          description: Список имён выбранных метрик. Передаётся повторением параметра metrics; допустимые имена уточняются с DS.
-          style: form
-          explode: true
-          schema:
-            type: array
-            minItems: 1
-            uniqueItems: true
-            items: {type: string, minLength: 1}
       responses:
         '200':
-          description: Рассчитанные метрики доступны.
+          description: Текущее состояние задачи и доступные результаты, включая частичный результат.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/MetricsResult'
+                $ref: '#/components/schemas/AnalysisResult'
+              examples:
+                waitingForGraph:
+                  summary: Граф ещё строится.
+                  value:
+                    job_id: job-001
+                    status: running
+                    graph_available: false
+                    metrics_available: false
+                    graph: null
+                    metrics: []
+                waitingForMetrics:
+                  summary: Граф готов, метрики ещё считаются.
+                  value:
+                    job_id: job-001
+                    status: running
+                    graph_available: true
+                    metrics_available: false
+                    graph:
+                      nodes:
+                        - {id: '1', position: [30.3, 59.3]}
+                        - {id: '2', position: [30.4, 59.4]}
+                      edges:
+                        - {id: '1', source: '1', target: '2'}
+                    metrics: []
+                metricsFailed:
+                  summary: Расчёт метрик завершился ошибкой; граф доступен.
+                  value:
+                    job_id: job-001
+                    status: failed
+                    graph_available: true
+                    metrics_available: false
+                    graph:
+                      nodes:
+                        - {id: '1', position: [30.3, 59.3]}
+                        - {id: '2', position: [30.4, 59.4]}
+                      edges:
+                        - {id: '1', source: '1', target: '2'}
+                    metrics: []
+                    error:
+                      code: metrics_calculation_failed
+                      message: Не удалось рассчитать метрики.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
-        '409':
-          $ref: '#/components/responses/ResultUnavailable'
-        '422':
-          $ref: '#/components/responses/ValidationError'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -362,7 +351,7 @@ components:
       required: true
       description: |
         Идентификатор, назначенный сервером при создании задачи.
-        Используется для статуса, heartbeat, отмены и получения результатов.
+        Используется для heartbeat со статусом, отмены и получения результата.
       schema:
         $ref: '#/components/schemas/Identifier'
       example: job-001
@@ -377,7 +366,6 @@ components:
           example:
             job_id: job-001
             status: running
-            stage: metrics_calculation
             graph_available: true
             metrics_available: false
     BadRequest:
@@ -407,18 +395,6 @@ components:
           example:
             code: area_outside_region
             message: Выделенная область выходит за границу региона.
-    ResultUnavailable:
-      description: |
-        Результат пока не готов либо не получен из-за ошибки или отмены.
-        Рабочие коды причины — result_not_ready и result_unavailable.
-        Состояние задачи и доступность каждого результата выдаёт ручка статуса.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/Error'
-          example:
-            code: result_not_ready
-            message: Результат ещё не готов.
     InternalError:
       description: Внутренняя ошибка обработки HTTP-запроса без технических подробностей.
       content:
@@ -477,7 +453,11 @@ components:
         properties:
           type: [object, 'null']
           additionalProperties: true
-          description: Атрибуты GeoJSON Feature; обязательные предметные поля пока не заданы.
+          description: |
+            Дополнительные сведения из исходного GeoJSON, например name или код региона.
+            Поле присутствует в Feature, но может содержать {} или null.
+            Обязательных атрибутов внутри нет; границу определяет geometry.
+            Атрибуты не заменяют region_id, назначаемый сервером.
 
     Position:
       type: array
@@ -594,13 +574,6 @@ components:
         отменено, завершено, ошибка. Точная машина переходов требует согласования.
         cancel_requested не означает подтверждённую остановку.
 
-    AnalysisStage:
-      type: [string, 'null']
-      enum: [graph_building, metrics_calculation, null]
-      description: |
-        Построение графа либо расчёт метрик. null — активного этапа нет.
-        Конкретный набор этапов и поведение после ошибки пока предварительные.
-
     AnalysisReceipt:
       type: object
       required: [job_id, status]
@@ -612,14 +585,12 @@ components:
 
     AnalysisStatus:
       type: object
-      required: [job_id, status, stage, graph_available, metrics_available]
+      required: [job_id, status, graph_available, metrics_available]
       properties:
         job_id:
           $ref: '#/components/schemas/Identifier'
         status:
           $ref: '#/components/schemas/JobState'
-        stage:
-          $ref: '#/components/schemas/AnalysisStage'
         graph_available:
           type: boolean
           description: Можно ли получить граф этой задачи.
@@ -627,7 +598,7 @@ components:
           type: boolean
           description: Можно ли получить метрики этой задачи.
         error:
-          description: Ошибка выполнения задачи; этап указан в stage ошибки.
+          description: Ошибка выполнения задачи с кодом и понятным сообщением.
           allOf:
             - $ref: '#/components/schemas/AnalysisFailure'
 
@@ -637,19 +608,36 @@ components:
       properties:
         code: {type: string}
         message: {type: string}
-        stage:
-          $ref: '#/components/schemas/AnalysisStage'
 
-    GraphResult:
-      type: object
-      x-draft: true
+    AnalysisResult:
       description: |
-        Набросок формата графа для обсуждения с frontend.
-        Идентификаторы, атрибуты, направленность и геометрию связей нужно согласовать.
-      required: [job_id, nodes, edges]
+        Состояние задачи и доступные результаты одним ответом.
+        graph равен null, если граф ещё не получен; пустой построенный граф
+        представлен объектом с пустыми nodes и edges.
+        metrics содержит массив всех рассчитанных метрик либо [].
+        При ошибке вычислений присутствует error; без ошибки поле отсутствует.
+        Доступность графа и метрик соответствует graph_available и metrics_available.
+      allOf:
+        - $ref: '#/components/schemas/AnalysisStatus'
+        - type: object
+          required: [graph, metrics]
+          properties:
+            graph:
+              oneOf:
+                - $ref: '#/components/schemas/Graph'
+                - type: 'null'
+            metrics:
+              $ref: '#/components/schemas/Metrics'
+
+    Graph:
+      type: object
+      description: |
+        Граф задачи: вершины с идентификаторами и координатами,
+        рёбра с идентификаторами и ссылками source и target на вершины.
+        У вершин и рёбер могут быть дополнительные атрибуты attributes.
+        Геометрия ребра, если передана, задаётся списком точек geometry.
+      required: [nodes, edges]
       properties:
-        job_id:
-          $ref: '#/components/schemas/Identifier'
         nodes:
           type: array
           items:
@@ -680,30 +668,36 @@ components:
               geometry:
                 type: array
                 minItems: 2
-                description: Предварительная геометрия маршрута; без неё вид связи нужно согласовать.
+                description: Необязательный список точек геометрии ребра в порядке [долгота, широта].
                 items:
                   $ref: '#/components/schemas/Position'
               attributes:
                 type: object
                 additionalProperties: true
 
-    MetricsResult:
-      type: object
-      x-draft: true
+    Metrics:
+      type: array
       description: |
-        Временный формат числовых метрик всего графа.
+        Массив числовых метрик. Каждый элемент содержит имя name и значение value (float).
         При обработке задачи считаются все поддерживаемые метрики,
-        а при выдаче возвращаются выбранные через metrics или все, если фильтра нет.
-        Не фиксирует окончательный состав метрик, единицы и метрики элементов графа.
-      required: [job_id, values]
-      properties:
-        job_id:
-          $ref: '#/components/schemas/Identifier'
-        values:
-          type: object
-          description: Выбранные имена метрик и их числовые значения; перечень имён согласуется с DS.
-          additionalProperties:
+        при выдаче все рассчитанные значения возвращаются одним ответом.
+        Метрики без рассчитанного значения отсутствуют в массиве.
+        Если значений нет, возвращается []. Причину определяют status и error.
+        Имена показателей в примере условные и не задают закрытый перечень.
+      items:
+        type: object
+        required: [name, value]
+        properties:
+          name:
+            type: string
+            minLength: 1
+            description: Имя показателя.
+          value:
             type: number
+            format: float
+      example:
+        - {name: vertex_count, value: 2.0}
+        - {name: edge_count, value: 1.0}
 
     Error:
       type: object
