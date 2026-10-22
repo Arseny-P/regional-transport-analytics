@@ -8,8 +8,10 @@ from models import TerritoryBounds, TerritoryValidationError
 # Настройки OSMnx по умолчанию
 ox.settings.log_console = False
 ox.settings.use_cache = True
-# Надежное зеркало Overpass для защиты от перегрузки основного сервера
-ox.settings.overpass_endpoint = "https://overpass.kumi.systems/api"
+ox.settings.requests_timeout = 180
+# Зеркало Overpass для OSMnx 2.x
+ox.settings.overpass_url = "https://overpass.kumi.systems/api"
+
 
 
 class RoadNetworkService:

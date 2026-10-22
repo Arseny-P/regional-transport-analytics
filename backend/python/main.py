@@ -181,9 +181,13 @@ def main():
         with open(facilities_path, "r", encoding="utf-8") as f:
             user_facilities = json.load(f)
 
-    facility_source = FacilitySourceType.USER_DEFINED.value
-    if args.osm_pois:
+    if args.osm_pois or (not user_facilities):
+        if not user_facilities:
+            print("[*] Пользовательский файл объектов не передан: активирован автоматический поиск объектов в OpenStreetMap.")
         facility_source = FacilitySourceType.HYBRID.value if user_facilities else FacilitySourceType.OSM.value
+    else:
+        facility_source = FacilitySourceType.USER_DEFINED.value
+
 
     request = AnalysisRequest(
         territory_type=territory_type,
