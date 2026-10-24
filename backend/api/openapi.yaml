@@ -6,7 +6,7 @@ info:
     Черновик контракта между frontend и Go-бэкендом по issue #25.
     Реализация обработчиков и внутренние межсервисные сообщения сюда не входят.
 
-    Загрузка региона, асинхронный запуск анализа, heartbeat со статусом,
+    Загрузка, список и выбор сохранённых регионов, асинхронный запуск анализа, heartbeat со статусом,
     отмена в два этапа, получение графа и метрик одним ответом.
     Виды транспорта: автомобильный, железнодорожный и морской. Авиации нет.
 
@@ -21,7 +21,7 @@ info:
 
 tags:
   - name: Regions
-    description: Загрузка границы региона.
+    description: Загрузка, список и получение сохранённых регионов.
   - name: Analysis
     description: Запуск и жизненный цикл задачи анализа.
   - name: Results
@@ -29,6 +29,36 @@ tags:
 
 paths:
   /regions:
+    get:
+      tags: [Regions]
+      operationId: listRegions
+      summary: Получить список загруженных регионов
+      description: |
+        Возвращает сохранённые регионы для выбора на frontend.
+        Каждый элемент содержит region_id и отображаемое имя name.
+        В текущем варианте name — исходное имя загруженного файла.
+        Геометрии в список не включаются; выбранный регион запрашивается
+        отдельно через GET /regions/{region_id}.
+        Список возвращается целиком без пагинации. Если регионов нет — [].
+      responses:
+        '200':
+          description: Список сохранённых регионов, в том числе пустой.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegionList'
+              examples:
+                savedRegions:
+                  summary: Два загруженных региона.
+                  value:
+                    - {region_id: region-001, name: spb.geojson}
+                    - {region_id: region-002, name: leningrad-region.geojson}
+                empty:
+                  summary: Регионы ещё не загружены.
+                  value: []
+        '500':
+          $ref: '#/components/responses/InternalError'
+
     post:
       tags: [Regions]
       operationId: uploadRegion
@@ -45,6 +75,7 @@ paths:
         В Polygon координаты — точки [долгота, широта], соединённые по порядку;
         последняя точка совпадает с первой, чтобы замкнуть границу.
         Содержимое разобранного файла описано схемой RegionFeatureCollection.
+        Исходное имя файла сохраняется для отображения региона в списке.
         В ответе предлагается возвращать идентификатор и нормализованную
         границу региона, чтобы frontend мог показать её на карте.
       requestBody:
@@ -83,6 +114,49 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /regions/{region_id}:
+    get:
+      tags: [Regions]
+      operationId: getRegion
+      summary: Получить выбранный регион и его границу
+      description: |
+        Возвращает ранее загруженный регион по region_id из списка регионов
+        или ответа загрузки. Ответ имеет ту же схему Region, что и POST /regions.
+        Frontend использует boundary для отображения выбранного региона на карте.
+        Повторно загружать файл для выбора региона или нового анализа не требуется.
+      parameters:
+        - in: path
+          name: region_id
+          required: true
+          description: Идентификатор сохранённого региона.
+          schema:
+            $ref: '#/components/schemas/Identifier'
+          example: region-001
+      responses:
+        '200':
+          description: Сохранённый регион и его граница.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Region'
+              example:
+                region_id: region-001
+                boundary:
+                  type: MultiPolygon
+                  coordinates: [
+                    [
+                      [
+                        [30, 59], [31, 59], [31, 60], [30, 60], [30, 59]
+                      ]
+                    ]
+                  ]
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
         '500':
           $ref: '#/components/responses/InternalError'
 
@@ -407,6 +481,24 @@ components:
       type: string
       minLength: 1
       description: Непрозрачный идентификатор; конкретный формат пока не выбран.
+
+    RegionList:
+      type: array
+      description: Список сохранённых регионов без геометрий; при отсутствии регионов — [].
+      items:
+        $ref: '#/components/schemas/RegionSummary'
+
+    RegionSummary:
+      type: object
+      required: [region_id, name]
+      properties:
+        region_id:
+          $ref: '#/components/schemas/Identifier'
+        name:
+          type: string
+          minLength: 1
+          description: Отображаемое имя региона; исходное имя загруженного файла.
+          example: spb.geojson
 
     Region:
       type: object
