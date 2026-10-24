@@ -1,6 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
+import {
+  DEFAULT_TRANSPORT_MODE,
+  TRANSPORT_MODES,
+  TRANSPORT_MODE_LABELS,
+} from '@/entities/transport-mode';
+import { bboxToQuery, buildUrl, request } from '@/shared/api';
 
 export default function ResultPage() {
   const location = useLocation();
@@ -10,7 +16,7 @@ export default function ResultPage() {
 
   const [loading, setLoading] = useState(true);
   const [metric, setMetric] = useState('mst_length');
-  const [mode, setMode] = useState(resultData?.mode || 'auto');
+  const [mode, setMode] = useState(resultData?.mode || DEFAULT_TRANSPORT_MODE);
   const [mapKey, setMapKey] = useState(Date.now());
   const [mapSrcState, setMapSrcState] = useState(null);
 
@@ -20,13 +26,11 @@ export default function ResultPage() {
 
   const defaultMapSrc = useMemo(() => {
     if (!resultData) return '';
-    const { bbox } = resultData;
+    const query = bboxToQuery(resultData.bbox);
 
-    if (mode === 'all') {
-      return `http://localhost:8000/map/all?west=${bbox[0]}&south=${bbox[1]}&east=${bbox[2]}&north=${bbox[3]}`;
-    }
+    if (mode === 'all') return buildUrl('/map/all', query);
 
-    return `http://localhost:8000/map?west=${bbox[0]}&south=${bbox[1]}&east=${bbox[2]}&north=${bbox[3]}&mode=${mode}`;
+    return buildUrl('/map', { ...query, mode });
   }, [resultData, mode]);
 
   const mapSrc = mapSrcState || defaultMapSrc;
@@ -36,20 +40,9 @@ export default function ResultPage() {
     try {
       setLoading(true);
 
-      const { bbox } = resultData;
-
-      const url =
-        `http://localhost:8000/metrics` +
-        `?metric=${encodeURIComponent(metric)}` +
-        `&west=${bbox[0]}` +
-        `&south=${bbox[1]}` +
-        `&east=${bbox[2]}` +
-        `&north=${bbox[3]}` +
-        `&mode=${encodeURIComponent(mode)}`;
-
-      const resp = await fetch(url);
-      if (!resp.ok) throw new Error(`Ошибка сервера: ${resp.status}`);
-      const data = await resp.json();
+      const data = await request('/metrics', {
+        params: { metric, ...bboxToQuery(resultData.bbox), mode },
+      });
 
       if (data.status !== 'ok') {
         alert('Анализ не удался: ' + (data.message || 'unknown'));
@@ -57,12 +50,7 @@ export default function ResultPage() {
         return;
       }
 
-      const analysisMapPath = data.map_path;
-      const fullUrl = analysisMapPath.startsWith('http')
-        ? analysisMapPath
-        : `http://localhost:8000/${analysisMapPath.replace(/^\/+/, '')}`;
-
-      setMapSrcState(fullUrl);
+      setMapSrcState(buildUrl(data.map_path));
       setMapKey(Date.now());
     } catch (err) {
       console.error(err);
@@ -88,11 +76,11 @@ export default function ResultPage() {
               }}
               style={{ width: '100%', padding: '6px', borderRadius: '6px' }}
             >
-              <option value="auto">Автомобильный</option>
-              <option value="aero">Авиационный</option>
-              <option value="sea">Морской</option>
-              <option value="rail">Железнодорожный</option>
-              <option value="all">Все режимы</option>
+              {TRANSPORT_MODES.map((m) => (
+                <option key={m} value={m}>
+                  {TRANSPORT_MODE_LABELS[m]}
+                </option>
+              ))}
             </select>
           </div>
 
