@@ -283,10 +283,8 @@ class LogisticsGraphService:
             edge_dict["conn_dest_ba_wkt"] = route_ba.get("dest_conn_wkt") or ""
             clean_attrs = {}
             for k, v in edge_dict.items():
-                if v is None:
-                    clean_attrs[k] = ""
-                elif isinstance(v, (list, dict)):
-                    clean_attrs[k] = json.dumps(v)
+                if isinstance(v, (list, dict)):
+                    clean_attrs[k] = json.dumps(v, ensure_ascii=False)
                 else:
                     clean_attrs[k] = v
 
@@ -304,9 +302,17 @@ class LogisticsGraphService:
     def save_graphml(self, log_graph: nx.MultiGraph, filename: str) -> str:
         """
         Сохраняет логистический MultiGraph в GraphML.
+        Конвертирует None в пустые строки для совместимости со схемой GraphML.
         """
+        clean_graph = nx.MultiGraph()
+        clean_graph.graph.update(log_graph.graph)
+        for n, data in log_graph.nodes(data=True):
+            clean_graph.add_node(n, **{k: ("" if v is None else v) for k, v in data.items()})
+        for u, v, k, data in log_graph.edges(keys=True, data=True):
+            clean_graph.add_edge(u, v, key=k, **{attr: ("" if val is None else val) for attr, val in data.items()})
+
         filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
-        nx.write_graphml(log_graph, filepath)
+        nx.write_graphml(clean_graph, filepath)
         print(f"[+] Логистический MultiGraph сохранен в GraphML: {filepath}")
         return filepath
 
@@ -482,16 +488,27 @@ class LogisticsGraphService:
             dist_ab = d.get("distance_ab_m")
             dist_ba = d.get("distance_ba_m")
 
-            if dist_ab is not None:
-                all_distances_km.append(round(dist_ab / 1000, 2))
-            if dist_ba is not None:
-                all_distances_km.append(round(dist_ba / 1000, 2))
+            dist_ab_val: Optional[float] = None
+            if dist_ab not in (None, ""):
+                try:
+                    dist_ab_val = float(dist_ab)
+                    all_distances_km.append(round(dist_ab_val / 1000, 2))
+                except (ValueError, TypeError):
+                    dist_ab_val = None
+
+            dist_ba_val: Optional[float] = None
+            if dist_ba not in (None, ""):
+                try:
+                    dist_ba_val = float(dist_ba)
+                    all_distances_km.append(round(dist_ba_val / 1000, 2))
+                except (ValueError, TypeError):
+                    dist_ba_val = None
 
             connections.append({
                 "pair": f"{d.get('node_a_name', u)} ⟷ {d.get('node_b_name', v)}",
                 "mode": key,
-                "dist_ab_km": round(dist_ab / 1000, 2) if dist_ab else None,
-                "dist_ba_km": round(dist_ba / 1000, 2) if dist_ba else None,
+                "dist_ab_km": round(dist_ab_val / 1000, 2) if dist_ab_val is not None else None,
+                "dist_ba_km": round(dist_ba_val / 1000, 2) if dist_ba_val is not None else None,
                 "status_ab": d.get("route_status_ab"),
                 "status_ba": d.get("route_status_ba")
             })

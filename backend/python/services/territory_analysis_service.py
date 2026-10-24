@@ -239,6 +239,14 @@ class TerritoryAnalysisService:
                 isolated_hubs.discard(v)
                 connected_pairs_count += 1
 
+            def safe_km(val: Any) -> Optional[float]:
+                if val in (None, ""):
+                    return None
+                try:
+                    return round(float(val) / 1000.0, 3)
+                except (ValueError, TypeError):
+                    return None
+
             connections_data.append({
                 "from_hub_id": u,
                 "to_hub_id": v,
@@ -247,10 +255,10 @@ class TerritoryAnalysisService:
                 "transport_mode": data.get("transport_mode", "road"),
                 "route_status_ab": status_ab,
                 "route_status_ba": status_ba,
-                "distance_ab_km": round(float(data.get("distance_ab_m", 0.0)) / 1000.0, 3) if data.get("distance_ab_m") is not None else None,
-                "distance_ba_km": round(float(data.get("distance_ba_m", 0.0)) / 1000.0, 3) if data.get("distance_ba_m") is not None else None,
-                "total_distance_ab_km": round(float(data.get("total_distance_ab_m", 0.0)) / 1000.0, 3) if data.get("total_distance_ab_m") is not None else None,
-                "total_distance_ba_km": round(float(data.get("total_distance_ba_m", 0.0)) / 1000.0, 3) if data.get("total_distance_ba_m") is not None else None,
+                "distance_ab_km": safe_km(data.get("distance_ab_m")),
+                "distance_ba_km": safe_km(data.get("distance_ba_m")),
+                "total_distance_ab_km": safe_km(data.get("total_distance_ab_m")),
+                "total_distance_ba_km": safe_km(data.get("total_distance_ba_m")),
             })
 
         if isolated_hubs and len(all_nodes) > 1:

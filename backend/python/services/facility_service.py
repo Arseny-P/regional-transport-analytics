@@ -177,7 +177,11 @@ class FacilityService:
         candidates: List[Dict[str, Any]] = []
 
         for idx, row in gdf.iterrows():
-            name = str(row.get("name") or "").strip()
+            raw_name = row.get("name")
+            if pd.isna(raw_name) or str(raw_name).strip().lower() in ("nan", "none", ""):
+                name = ""
+            else:
+                name = str(raw_name).strip()
             name_lower = name.lower()
 
             # Исключаем паразитные нелогистические объекты (котельные, ТЭЦ, гаражи, свалки)
@@ -269,10 +273,13 @@ class FacilityService:
                 "name_matched_keyword": matched_kw,
             }
 
+            fallback_title = "Логистический комплекс" if is_site else "Складской объект"
+            display_name = name if name else f"{fallback_title} #{len(candidates) + 1} ({obj_type})"
+
             candidates.append({
                 "row_name": row.name if hasattr(row, "name") else idx,
                 "osm_id_str": osm_id_str,
-                "name": name if name else f"Логистический комплекс #{len(candidates) + 1}",
+                "name": display_name,
                 "object_type": obj_type,
                 "latitude": round(float(point.y), 6),
                 "longitude": round(float(point.x), 6),

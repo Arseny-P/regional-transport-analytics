@@ -264,7 +264,7 @@ class AnalysisRequest:
 
     facility_source: str = FacilitySourceType.USER_DEFINED.value
     facilities: List[Dict[str, Any]] = field(default_factory=list)
-    osm_facilities_limit: int = 15
+    osm_facilities_limit: int = 100
     osm_tags: Optional[Dict[str, Any]] = None
 
     knn: Optional[int] = None

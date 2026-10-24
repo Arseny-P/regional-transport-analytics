@@ -57,7 +57,7 @@ def parse_args():
     parser.add_argument(
         "--osm-limit",
         type=int,
-        default=15,
+        default=100,
         help="Лимит количества объектов при выгрузке из OSM (по умолчанию: 15)",
     )
 
