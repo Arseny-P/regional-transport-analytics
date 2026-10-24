@@ -4,7 +4,8 @@ from typing import List, Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
 import pandas as pd
-from models import LogisticsNode, VerificationStatus, TransportMode
+from models import LogisticsNode, VerificationStatus, TransportMode, TerritoryBounds, FacilityValidationError
+import geopandas as gpd
 
 
 class FacilityService:
@@ -18,14 +19,96 @@ class FacilityService:
         "кнс", "насосная", "гск", "свалка", "шиномонтаж", "автомойка"
     ]
 
+    DEFAULT_OSM_TAGS = {
+        "landuse": ["industrial", "port", "depot", "logistics"],
+        "building": ["warehouse", "industrial"],
+        "harbour": True,
+        "amenity": ["post_office"],
+        "industrial": ["warehouse", "port", "depot", "logistics"],
+    }
+
     def __init__(self, storage_dir: str = "data"):
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
 
-    def load_from_json(self, filepath: str) -> List[LogisticsNode]:
+    def parse_and_validate_facilities(
+        self,
+        facilities_data: List[Dict[str, Any]],
+        territory_bounds: Optional[TerritoryBounds] = None,
+        filter_outside: bool = False,
+    ) -> List[LogisticsNode]:
         """
-        Загружает тестовый набор логистических объектов из JSON-файла
-        и возвращает типизированный список LogisticsNode.
+        Валидирует и преобразует произвольный пользовательский набор объектов в список LogisticsNode.
+        Проверяет наличие координат, корректность диапазонов, уникальность ID и границы территории.
+        """
+        if not isinstance(facilities_data, list):
+            raise FacilityValidationError("Набор данных логистических объектов должен быть списком (list).")
+
+        if not facilities_data:
+            raise FacilityValidationError("Передан пустой список логистических объектов.")
+
+        nodes: List[LogisticsNode] = []
+        seen_ids = set()
+
+        for idx, item in enumerate(facilities_data, start=1):
+            if not isinstance(item, dict):
+                raise FacilityValidationError(f"Элемент #{idx} должен быть словарем (dict), получено: {type(item).__name__}")
+
+            raw_id = item.get("id")
+            node_id = str(raw_id).strip() if raw_id is not None and str(raw_id).strip() else f"node_{idx}"
+            if node_id in seen_ids:
+                node_id = f"{node_id}_{idx}"
+            seen_ids.add(node_id)
+
+            name = str(item.get("name") or f"Объект #{idx}").strip()
+            obj_type = str(item.get("type") or item.get("object_type") or "facility").strip()
+
+            lat_val = item.get("lat") if "lat" in item else item.get("latitude")
+            lon_val = item.get("lon") if "lon" in item else item.get("longitude")
+
+            if lat_val is None or lon_val is None:
+                raise FacilityValidationError(f"Объект '{name}' (ID: {node_id}) не содержит обязательных координат 'lat' / 'lon'.")
+
+            try:
+                lat = float(lat_val)
+                lon = float(lon_val)
+            except (ValueError, TypeError):
+                raise FacilityValidationError(f"Координаты объекта '{name}' (ID: {node_id}) должны быть числами. Получено: lat={lat_val}, lon={lon_val}")
+
+            if not (-90.0 <= lat <= 90.0):
+                raise FacilityValidationError(f"Широта объекта '{name}' ({lat}) вне диапазона [-90, 90].")
+            if not (-180.0 <= lon <= 180.0):
+                raise FacilityValidationError(f"Долгота объекта '{name}' ({lon}) вне диапазона [-180, 180].")
+
+            if territory_bounds is not None and not territory_bounds.contains(lat, lon):
+                warning_msg = f"[!] Внимание: объект '{name}' ({lat:.4f}, {lon:.4f}) находится за пределами территории {territory_bounds.to_dict()}."
+                if filter_outside:
+                    print(f"{warning_msg} Объект отфильтрован.")
+                    continue
+                else:
+                    print(warning_msg)
+
+            node = LogisticsNode(
+                id=node_id,
+                name=name,
+                object_type=obj_type,
+                latitude=round(lat, 6),
+                longitude=round(lon, 6),
+                region_ids=item.get("region_ids", ["custom-region"]),
+                source_osm_ids=item.get("source_osm_ids", []),
+                verification_status=item.get("verification_status", VerificationStatus.VERIFIED.value),
+                transport_modes=item.get("transport_modes", [TransportMode.ROAD.value]),
+            )
+            nodes.append(node)
+
+        if not nodes:
+            raise FacilityValidationError("После валидации и фильтрации не осталось ни одного валидного объекта.")
+
+        return nodes
+
+    def load_from_json(self, filepath: str, territory_bounds: Optional[TerritoryBounds] = None) -> List[LogisticsNode]:
+        """
+        Загружает тестовый или пользовательский набор логистических объектов из JSON-файла с валидацией.
         """
         if not os.path.isabs(filepath):
             filepath = os.path.join(self.storage_dir, filepath)
@@ -36,58 +119,19 @@ class FacilityService:
         with open(filepath, "r", encoding="utf-8") as f:
             raw_data: List[Dict[str, Any]] = json.load(f)
 
-        nodes: List[LogisticsNode] = []
-        for item in raw_data:
-            node = LogisticsNode(
-                id=str(item["id"]),
-                name=str(item["name"]),
-                object_type=str(item.get("type") or item.get("object_type", "facility")),
-                latitude=float(item.get("lat") or item.get("latitude")),
-                longitude=float(item.get("lon") or item.get("longitude")),
-                region_ids=item.get("region_ids", ["ru-spb"]),
-                source_osm_ids=item.get("source_osm_ids", []),
-                verification_status=item.get("verification_status", VerificationStatus.VERIFIED.value),
-                transport_modes=item.get("transport_modes", [TransportMode.ROAD.value]),
-            )
-            nodes.append(node)
-
-        print(f"[+] Загружено {len(nodes)} логистических объектов из файла: {filepath}")
+        nodes = self.parse_and_validate_facilities(raw_data, territory_bounds=territory_bounds)
+        print(f"[+] Загружено и валидировано {len(nodes)} логистических объектов из файла: {filepath}")
         return nodes
 
-    def fetch_from_osm(
-        self, 
-        place_name: str, 
-        tags: Optional[Dict[str, Any]] = None,
+    def _extract_nodes_from_gdf(
+        self,
+        gdf: Any,
         limit: int = 15,
         region_id: str = "ru-spb",
-        which_result: Optional[int] = None
     ) -> List[LogisticsNode]:
         """
-        Автоматически находит логистические/промышленные объекты в OSM с умной фильтрацией.
+        Внутренний метод извлечения и фильтрации логистических объектов из GeoDataFrame OSM.
         """
-        if tags is None:
-            tags = {
-                "landuse": ["industrial", "port", "depot", "logistics"],
-                "building": ["warehouse", "industrial"],
-                "harbour": True,
-                "amenity": ["post_office"],
-                "industrial": ["warehouse", "port", "depot", "logistics"]
-            }
-
-        print(f"[*] Поиск логистических объектов в OSM для: '{place_name}'...")
-        try:
-            kwargs = {"tags": tags}
-            if which_result is not None:
-                kwargs["which_result"] = which_result
-            gdf = ox.features_from_place(place_name, **kwargs)
-        except Exception as e:
-            print(f"[-] Ошибка при запросе к OSM Overpass API: {e}")
-            return []
-
-        if gdf.empty:
-            print("[-] Подходящих объектов в указанной локации не найдено.")
-            return []
-
         named_gdf = gdf[gdf["name"].notna()].copy() if "name" in gdf.columns else gdf.copy()
         if named_gdf.empty:
             named_gdf = gdf.copy()
@@ -125,7 +169,7 @@ class FacilityService:
                     region_ids=[region_id],
                     source_osm_ids=[osm_id_str],
                     verification_status=VerificationStatus.CANDIDATE.value,
-                    transport_modes=[TransportMode.ROAD.value]
+                    transport_modes=[TransportMode.ROAD.value],
                 )
             )
 
@@ -134,6 +178,62 @@ class FacilityService:
 
         print(f"[+] Из OSM отфильтровано и отобрано {len(nodes)} логистических объектов-кандидатов.")
         return nodes
+
+    def fetch_from_osm_bbox(
+        self,
+        bbox: TerritoryBounds,
+        tags: Optional[Dict[str, Any]] = None,
+        limit: int = 15,
+        region_id: str = "custom",
+    ) -> List[LogisticsNode]:
+        """
+        Автоматически находит логистические/промышленные объекты в OSM внутри заданного BBox.
+        """
+        bbox.validate()
+        query_tags = tags or self.DEFAULT_OSM_TAGS
+
+        print(f"[*] Поиск логистических объектов в OSM для BBox: "
+              f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
+        try:
+            gdf = ox.features_from_bbox(bbox=bbox.to_osmnx_bbox(), tags=query_tags)
+        except Exception as e:
+            print(f"[-] Ошибка при запросе к OSM Overpass API по BBox: {e}")
+            return []
+
+        if gdf.empty:
+            print("[-] Подходящих объектов в указанном BBox не найдено.")
+            return []
+
+        return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
+
+    def fetch_from_osm(
+        self, 
+        place_name: str, 
+        tags: Optional[Dict[str, Any]] = None,
+        limit: int = 15,
+        region_id: str = "ru-spb",
+        which_result: Optional[int] = None
+    ) -> List[LogisticsNode]:
+        """
+        Автоматически находит логистические/промышленные объекты в OSM по названию территории с умной фильтрацией.
+        """
+        query_tags = tags or self.DEFAULT_OSM_TAGS
+
+        print(f"[*] Поиск логистических объектов в OSM для: '{place_name}'...")
+        try:
+            kwargs = {"tags": query_tags}
+            if which_result is not None:
+                kwargs["which_result"] = which_result
+            gdf = ox.features_from_place(place_name, **kwargs)
+        except Exception as e:
+            print(f"[-] Ошибка при запросе к OSM Overpass API: {e}")
+            return []
+
+        if gdf.empty:
+            print("[-] Подходящих объектов в указанной локации не найдено.")
+            return []
+
+        return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
 
     def snap_to_road_network(
         self, 

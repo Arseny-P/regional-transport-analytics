@@ -5,7 +5,13 @@
 
 from typing import List, Dict, Any, Optional
 import networkx as nx
-from services import RoadNetworkService, FacilityService, LogisticsGraphService
+from models import AnalysisRequest, AnalysisResponse, TerritoryBounds
+from services import (
+    RoadNetworkService,
+    FacilityService,
+    LogisticsGraphService,
+    TerritoryAnalysisService,
+)
 
 
 class GraphService:
@@ -18,6 +24,12 @@ class GraphService:
         self.road_service = RoadNetworkService(storage_dir=storage_dir)
         self.facility_service = FacilityService(storage_dir=storage_dir)
         self.logistics_service = LogisticsGraphService(storage_dir=storage_dir)
+        self.pipeline_service = TerritoryAnalysisService(default_storage_dir=storage_dir)
+
+    def run_analysis(self, request: AnalysisRequest) -> AnalysisResponse:
+        """Сквозной запуск анализа территории через оркестратор."""
+        return self.pipeline_service.run_analysis(request=request)
+
 
     # --- Дорожная сеть ---
     def fetch_and_build_graph(self, place_name: str) -> nx.MultiDiGraph:
