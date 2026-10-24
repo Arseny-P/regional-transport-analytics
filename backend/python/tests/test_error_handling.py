@@ -1,3 +1,4 @@
+import os
 import unittest
 from models import (
     AnalysisRequest,
@@ -12,7 +13,8 @@ from services import TerritoryAnalysisService
 
 class TestErrorHandling(unittest.TestCase):
     def setUp(self):
-        self.service = TerritoryAnalysisService(default_storage_dir="data")
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        self.service = TerritoryAnalysisService(default_storage_dir=data_dir)
 
     def test_missing_bbox_for_bbox_mode(self):
         req = AnalysisRequest(

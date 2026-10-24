@@ -16,7 +16,7 @@ from services import TerritoryAnalysisService, LogisticsGraphService
 
 class TestPipelineOffline(unittest.TestCase):
     def setUp(self):
-        self.data_dir = "data"
+        self.data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
         self.service = TerritoryAnalysisService(default_storage_dir=self.data_dir)
         self.logistics_service = LogisticsGraphService(storage_dir=self.data_dir)
 
