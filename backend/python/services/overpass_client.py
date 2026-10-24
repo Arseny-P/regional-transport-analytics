@@ -2,7 +2,7 @@ import time
 from typing import Callable, Any, List
 import osmnx as ox
 
-# Список проверенных публичных зеркал Overpass API в порядке приоритета
+# Список проверенных публичных глобальных зеркал Overpass API в порядке приоритета
 OVERPASS_MIRRORS: List[str] = [
     "https://overpass-api.de/api",
     "https://overpass.kumi.systems/api",

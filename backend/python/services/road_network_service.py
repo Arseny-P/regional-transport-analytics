@@ -9,7 +9,7 @@ from services.overpass_client import execute_with_overpass_fallback
 # Настройки OSMnx по умолчанию
 ox.settings.log_console = False
 ox.settings.use_cache = True
-ox.settings.requests_timeout = 180
+ox.settings.requests_timeout = 60
 
 
 class RoadNetworkService:
