@@ -2,6 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Layout } from '@/widgets/layout';
 import { MapView } from '@/widgets/map-view';
+import {
+  DEFAULT_TRANSPORT_MODE,
+  TRANSPORT_MODES,
+  TRANSPORT_MODE_LABELS,
+} from '@/entities/transport-mode';
+import { request } from '@/shared/api';
 
 export default function AnalysisPage() {
   const navigate = useNavigate();
@@ -9,7 +15,7 @@ export default function AnalysisPage() {
   const [selectedArea, setSelectedArea] = useState(null);
   const [point1, setPoint1] = useState('');
   const [point2, setPoint2] = useState('');
-  const [selectedMode, setSelectedMode] = useState('auto');
+  const [selectedMode, setSelectedMode] = useState(DEFAULT_TRANSPORT_MODE);
 
   const [isLoading, setIsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState('Подготовка...');
@@ -76,59 +82,18 @@ export default function AnalysisPage() {
       <div style={{ marginTop: '20px' }}>
         <h4 style={{ marginBottom: '8px' }}>Тип маршрута:</h4>
 
-        <label style={{ display: 'block', marginBottom: '6px' }}>
-          <input
-            type="radio"
-            name="mode"
-            value="auto"
-            checked={selectedMode === 'auto'}
-            onChange={() => setSelectedMode('auto')}
-          />{' '}
-          Автомобильный
-        </label>
-
-        <label style={{ display: 'block', marginBottom: '6px' }}>
-          <input
-            type="radio"
-            name="mode"
-            value="aero"
-            checked={selectedMode === 'aero'}
-            onChange={() => setSelectedMode('aero')}
-          />{' '}
-          Авиационный
-        </label>
-
-        <label style={{ display: 'block', marginBottom: '6px' }}>
-          <input
-            type="radio"
-            name="mode"
-            value="sea"
-            checked={selectedMode === 'sea'}
-            onChange={() => setSelectedMode('sea')}
-          />{' '}
-          Морской
-        </label>
-
-        <label style={{ display: 'block', marginBottom: '6px' }}>
-          <input
-            type="radio"
-            name="mode"
-            value="rail"
-            checked={selectedMode === 'rail'}
-            onChange={() => setSelectedMode('rail')}
-          />{' '}
-          Железнодорожный
-        </label>
-        <label style={{ display: 'block', marginBottom: '6px' }}>
-          <input
-            type="radio"
-            name="mode"
-            value="all"
-            checked={selectedMode === 'all'}
-            onChange={() => setSelectedMode('all')}
-          />{' '}
-          Все режимы
-        </label>
+        {TRANSPORT_MODES.map((mode) => (
+          <label key={mode} style={{ display: 'block', marginBottom: '6px' }}>
+            <input
+              type="radio"
+              name="mode"
+              value={mode}
+              checked={selectedMode === mode}
+              onChange={() => setSelectedMode(mode)}
+            />{' '}
+            {TRANSPORT_MODE_LABELS[mode]}
+          </label>
+        ))}
       </div>
     </>
   );
@@ -161,12 +126,10 @@ export default function AnalysisPage() {
       const [maxLng, maxLat] = geojson.geometry.coordinates[0][2];
       const mode = geojson.properties.mode;
 
-      const url = `http://localhost:8000/analyze?west=${minLng}&south=${minLat}&east=${maxLng}&north=${maxLat}&mode=${mode}`;
-
-      const response = await fetch(url, { method: 'POST' });
-      if (!response.ok) throw new Error(`Ошибка сервера: ${response.status}`);
-
-      const data = await response.json();
+      const data = await request('/analyze', {
+        method: 'POST',
+        params: { west: minLng, south: minLat, east: maxLng, north: maxLat, mode },
+      });
       return {
         ...data,
         bbox: [minLng, minLat, maxLng, maxLat],
