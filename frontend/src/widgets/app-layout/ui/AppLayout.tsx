@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
+import { Outlet } from 'react-router-dom';
 
-export default function Layout({ children, sidebarContent }) {
+export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarNode, setSidebarNode] = useState<HTMLDivElement | null>(null);
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100vh', overflow: 'hidden' }}>
@@ -53,7 +55,7 @@ export default function Layout({ children, sidebarContent }) {
           ✕
         </button>
 
-        {sidebarContent}
+        <div ref={setSidebarNode} style={{ display: 'flex', flexDirection: 'column' }} />
       </div>
 
       {!sidebarOpen && (
@@ -76,7 +78,9 @@ export default function Layout({ children, sidebarContent }) {
         </button>
       )}
 
-      <main style={{ width: '100%', height: '100%' }}>{children}</main>
+      <main style={{ width: '100%', height: '100%' }}>
+        <Outlet context={sidebarNode} />
+      </main>
 
       <footer
         style={{
@@ -91,8 +95,8 @@ export default function Layout({ children, sidebarContent }) {
           transition: 'opacity 0.3s',
           zIndex: 1000,
         }}
-        onMouseEnter={(e) => (e.currentTarget.style.opacity = 1)}
-        onMouseLeave={(e) => (e.currentTarget.style.opacity = 0)}
+        onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
+        onMouseLeave={(e) => (e.currentTarget.style.opacity = '0')}
       >
         <div style={{ fontSize: '12px', color: '#444' }}>
           Карта ©{' '}
@@ -106,7 +110,7 @@ export default function Layout({ children, sidebarContent }) {
           contributors
           <br />
           <a
-            href="https://github.com/agalikeev/analyze-logistic"
+            href="https://github.com/Arseny-P/regional-transport-analytics"
             target="_blank"
             rel="noopener noreferrer"
           >
