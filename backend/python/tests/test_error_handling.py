@@ -60,6 +60,32 @@ class TestErrorHandling(unittest.TestCase):
         self.assertEqual(res.status, AnalysisStatus.ERROR.value)
         self.assertIn("не содержит обязательных координат", res.error_message)
 
+    def test_overpass_fallback_succeeds_on_second_mirror(self):
+        from services.overpass_client import execute_with_overpass_fallback
+        from unittest.mock import MagicMock, patch
+
+        mock_func = MagicMock()
+        mock_func.side_effect = [ConnectionError("502 Bad Gateway"), "mock_graph"]
+
+        with patch("time.sleep"):
+            res = execute_with_overpass_fallback(mock_func, "dummy_arg")
+        self.assertEqual(res, "mock_graph")
+        self.assertEqual(mock_func.call_count, 2)
+
+    def test_overpass_fallback_fails_when_all_mirrors_fail(self):
+        from services.overpass_client import execute_with_overpass_fallback, OVERPASS_MIRRORS
+        from unittest.mock import MagicMock, patch
+
+        mock_func = MagicMock(side_effect=TimeoutError("Request timed out"))
+
+        with patch("time.sleep"):
+            with self.assertRaises(RuntimeError) as ctx:
+                execute_with_overpass_fallback(mock_func)
+
+        self.assertEqual(mock_func.call_count, len(OVERPASS_MIRRORS))
+        self.assertIn("Все доступные зеркала Overpass API завершились ошибкой", str(ctx.exception))
+
 
 if __name__ == "__main__":
     unittest.main()
+

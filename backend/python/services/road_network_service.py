@@ -4,14 +4,12 @@ import networkx as nx
 import osmnx as ox
 import geopandas as gpd
 from models import TerritoryBounds, TerritoryValidationError
+from services.overpass_client import execute_with_overpass_fallback
 
 # Настройки OSMnx по умолчанию
 ox.settings.log_console = False
 ox.settings.use_cache = True
 ox.settings.requests_timeout = 180
-# Зеркало Overpass для OSMnx 2.x
-ox.settings.overpass_url = "https://overpass.kumi.systems/api"
-
 
 
 class RoadNetworkService:
@@ -30,15 +28,16 @@ class RoadNetworkService:
         simplify: bool = True,
     ) -> nx.MultiDiGraph:
         """
-        Загружает автомобильную дорожную сеть из OSM для заданного BBox (TerritoryBounds).
-        Использует формат OSMnx 2.x (left, bottom, right, top) -> (min_lon, min_lat, max_lon, max_lat).
+        Загружает автомобильную дорожную сеть из OSM для заданного BBox (TerritoryBounds)
+        с автоматической ротацией зеркал Overpass API.
         """
         bbox.validate()
         print(f"[*] Загрузка данных дорожной сети OSM по BBox: "
               f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
 
         try:
-            graph = ox.graph_from_bbox(
+            graph = execute_with_overpass_fallback(
+                ox.graph_from_bbox,
                 bbox=bbox.to_osmnx_bbox(),
                 network_type=network_type,
                 simplify=simplify,
@@ -60,14 +59,19 @@ class RoadNetworkService:
         which_result: Optional[int] = None
     ) -> nx.MultiDiGraph:
         """
-        Загружает дорожную сеть из OSM и строит топологически корректный граф дорог.
+        Загружает дорожную сеть из OSM и строит топологически корректный граф дорог
+        с автоматической ротацией зеркал Overpass API.
         """
         print(f"[*] Загрузка данных дорожной сети OSM для: '{place_name}'...")
         kwargs = {"network_type": network_type, "simplify": simplify}
         if which_result is not None:
             kwargs["which_result"] = which_result
 
-        graph = ox.graph_from_place(place_name, **kwargs)
+        try:
+            graph = execute_with_overpass_fallback(ox.graph_from_place, place_name, **kwargs)
+        except Exception as e:
+            raise RuntimeError(f"Ошибка загрузки дорожной сети OSM для '{place_name}': {e}") from e
+
         print(f"[+] Дорожная сеть построена: {len(graph.nodes)} вершин, {len(graph.edges)} ребер.")
         return graph
 

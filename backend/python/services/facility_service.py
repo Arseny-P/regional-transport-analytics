@@ -6,6 +6,7 @@ import osmnx as ox
 import pandas as pd
 from models import LogisticsNode, VerificationStatus, TransportMode, TerritoryBounds, FacilityValidationError
 import geopandas as gpd
+from services.overpass_client import execute_with_overpass_fallback
 
 
 class FacilityService:
@@ -195,7 +196,11 @@ class FacilityService:
         print(f"[*] Поиск логистических объектов в OSM для BBox: "
               f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
         try:
-            gdf = ox.features_from_bbox(bbox=bbox.to_osmnx_bbox(), tags=query_tags)
+            gdf = execute_with_overpass_fallback(
+                ox.features_from_bbox,
+                bbox=bbox.to_osmnx_bbox(),
+                tags=query_tags,
+            )
         except Exception as e:
             print(f"[-] Ошибка при запросе к OSM Overpass API по BBox: {e}")
             return []
@@ -224,7 +229,11 @@ class FacilityService:
             kwargs = {"tags": query_tags}
             if which_result is not None:
                 kwargs["which_result"] = which_result
-            gdf = ox.features_from_place(place_name, **kwargs)
+            gdf = execute_with_overpass_fallback(
+                ox.features_from_place,
+                place_name,
+                **kwargs,
+            )
         except Exception as e:
             print(f"[-] Ошибка при запросе к OSM Overpass API: {e}")
             return []
