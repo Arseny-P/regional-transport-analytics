@@ -6,7 +6,7 @@ from shapely.geometry import Point, LineString, MultiLineString, mapping
 from shapely.ops import linemerge
 from shapely import wkt
 
-from models import LogisticsNode, LogisticsEdge, TransportMode, RouteStatus
+from models import LogisticsNode, LogisticsEdge, TransportMode, RouteStatus, GraphRole
 
 
 class LogisticsGraphService:
@@ -160,6 +160,13 @@ class LogisticsGraphService:
                         object_type=str(n.get("object_type") or n.get("type", "facility")),
                         latitude=float(n.get("latitude") or n.get("lat")),
                         longitude=float(n.get("longitude") or n.get("lon")),
+                        region_ids=n.get("region_ids", ["ru-spb"]),
+                        source_osm_ids=n.get("source_osm_ids", []),
+                        verification_status=n.get("verification_status", "candidate"),
+                        transport_modes=n.get("transport_modes", [TransportMode.ROAD.value]),
+                        identification_basis=n.get("identification_basis", {}),
+                        parent_site_id=n.get("parent_site_id"),
+                        graph_role=n.get("graph_role", GraphRole.NODE_CANDIDATE.value),
                         nearest_osm_node=n.get("nearest_osm_node"),
                         osm_node_lat=n.get("osm_node_lat"),
                         osm_node_lon=n.get("osm_node_lon"),
@@ -178,6 +185,9 @@ class LogisticsGraphService:
                 region_ids=",".join(node.region_ids),
                 verification_status=node.verification_status,
                 transport_modes=",".join(node.transport_modes),
+                parent_site_id=node.parent_site_id or "",
+                graph_role=node.graph_role,
+                identification_basis=json.dumps(node.identification_basis, ensure_ascii=False),
                 nearest_osm_node=node.nearest_osm_node or 0,
                 osm_node_lat=node.osm_node_lat or 0.0,
                 osm_node_lon=node.osm_node_lon or 0.0,
@@ -334,6 +344,9 @@ class LogisticsGraphService:
                     "id": node_id,
                     "name": data.get("name", node_id),
                     "object_type": data.get("object_type", "facility"),
+                    "verification_status": data.get("verification_status", "candidate"),
+                    "graph_role": data.get("graph_role", "node_candidate"),
+                    "parent_site_id": data.get("parent_site_id") or None,
                     "snap_distance_m": data.get("snap_distance_m", 0.0),
                     "nearest_osm_node": data.get("nearest_osm_node", 0),
                     "region_ids": data.get("region_ids", "ru-spb")

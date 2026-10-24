@@ -4,7 +4,7 @@ from typing import List, Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
 import pandas as pd
-from models import LogisticsNode, VerificationStatus, TransportMode, TerritoryBounds, FacilityValidationError
+from models import LogisticsNode, VerificationStatus, GraphRole, TransportMode, TerritoryBounds, FacilityValidationError
 import geopandas as gpd
 from services.overpass_client import execute_with_overpass_fallback
 
@@ -20,12 +20,23 @@ class FacilityService:
         "кнс", "насосная", "гск", "свалка", "шиномонтаж", "автомойка"
     ]
 
+    EXCLUDE_DEPOT_TYPES = {
+        "bus", "tram", "subway", "trolleybus", "passengers", "metro"
+    }
+
+    LOGISTICS_KEYWORDS = [
+        "склад", "терминал", "логистическ", "распределительн", "рц", "грузов",
+        "порт", "логистик", "warehouse", "terminal", "logistics", "freight", "cargo"
+    ]
+
     DEFAULT_OSM_TAGS = {
         "landuse": ["industrial", "port", "depot", "logistics"],
         "building": ["warehouse", "industrial"],
         "harbour": True,
         "amenity": ["post_office"],
         "industrial": ["warehouse", "port", "depot", "logistics"],
+        "railway": ["yard", "loading_ramp"],
+        "port": ["cargo"],
     }
 
     def __init__(self, storage_dir: str = "data"):
@@ -99,6 +110,9 @@ class FacilityService:
                 source_osm_ids=item.get("source_osm_ids", []),
                 verification_status=item.get("verification_status", VerificationStatus.VERIFIED.value),
                 transport_modes=item.get("transport_modes", [TransportMode.ROAD.value]),
+                identification_basis=item.get("identification_basis", {"source": "user_input"}),
+                parent_site_id=item.get("parent_site_id"),
+                graph_role=item.get("graph_role", GraphRole.NODE_CANDIDATE.value),
             )
             nodes.append(node)
 
@@ -124,6 +138,28 @@ class FacilityService:
         print(f"[+] Загружено и валидировано {len(nodes)} логистических объектов из файла: {filepath}")
         return nodes
 
+    @staticmethod
+    def _format_osm_id(idx_val: Any, row: Any = None) -> str:
+        """
+        Форматирует ID элемента в устойчивый вид согласно спецификации PM (п. 3.4):
+        osm:way/12345, osm:relation/67890, osm:node/111.
+        """
+        if isinstance(idx_val, tuple) and len(idx_val) == 2:
+            return f"osm:{idx_val[0]}/{idx_val[1]}"
+        
+        elem_type = None
+        if hasattr(row, "get"):
+            elem_type = row.get("element_type")
+        elif hasattr(row, "element_type"):
+            elem_type = getattr(row, "element_type")
+
+        if elem_type and not str(idx_val).startswith(str(elem_type)):
+            return f"osm:{elem_type}/{idx_val}"
+        idx_str = str(idx_val)
+        if idx_str.startswith("osm:"):
+            return idx_str
+        return f"osm:{idx_str}"
+
     def _extract_nodes_from_gdf(
         self,
         gdf: Any,
@@ -131,18 +167,53 @@ class FacilityService:
         region_id: str = "ru-spb",
     ) -> List[LogisticsNode]:
         """
-        Внутренний метод извлечения и фильтрации логистических объектов из GeoDataFrame OSM.
+        Извлекает, классифицирует и разделяет логистические объекты на здания и территории
+        согласно пунктам 3.2 и 3.3 спецификации PM.
         """
-        named_gdf = gdf[gdf["name"].notna()].copy() if "name" in gdf.columns else gdf.copy()
-        if named_gdf.empty:
-            named_gdf = gdf.copy()
+        if gdf.empty:
+            return []
 
-        nodes: List[LogisticsNode] = []
-        for idx, row in named_gdf.iterrows():
+        # 1. Первичная фильтрация и извлечение кандидатов (п. 3.2)
+        candidates: List[Dict[str, Any]] = []
+
+        for idx, row in gdf.iterrows():
             name = str(row.get("name") or "").strip()
             name_lower = name.lower()
 
+            # Исключаем паразитные нелогистические объекты (котельные, ТЭЦ, гаражи, свалки)
             if any(kw in name_lower for kw in self.EXCLUDE_KEYWORDS):
+                continue
+
+            # Фильтрация пассажирских депо
+            depot_val = str(row.get("depot") or "").strip().lower()
+            if depot_val in self.EXCLUDE_DEPOT_TYPES:
+                continue
+
+            # Фильтрация пассажирских ж/д станций (п. 3.2: railway=station не доказывает грузовую функцию)
+            railway_val = str(row.get("railway") or "").strip().lower()
+            if railway_val == "station":
+                has_cargo = (
+                    pd.notna(row.get("cargo"))
+                    or (pd.notna(row.get("service")) and row.get("service") in ["spur", "siding"])
+                    or any(kw in name_lower for kw in ["грузов", "товарн", "сортировочн", "cargo", "freight", "yard", "ramp"])
+                )
+                if not has_cargo:
+                    continue
+
+            # Проверка landuse=industrial (п. 3.1 & 3.2: сам по себе не подтверждает логистическую роль)
+            is_generic_industrial = (
+                row.get("landuse") == "industrial"
+                and pd.isna(row.get("industrial"))
+                and pd.isna(row.get("building"))
+                and pd.isna(row.get("harbour"))
+                and pd.isna(row.get("amenity"))
+                and pd.isna(row.get("railway"))
+                and pd.isna(row.get("port"))
+            )
+            matched_kw = next((kw for kw in self.LOGISTICS_KEYWORDS if kw in name_lower), None)
+
+            # Если объект — общая безымянная промзона без признаков логистики, не делаем из нее узел
+            if is_generic_industrial and not matched_kw:
                 continue
 
             geom = row.geometry
@@ -151,34 +222,129 @@ class FacilityService:
             else:
                 point = geom.centroid
 
+            # Определение типа объекта и основания классификации (п. 3.2)
             obj_type = "facility"
-            for tag in ["amenity", "building", "landuse", "harbour", "industrial"]:
-                val = row.get(tag)
-                if pd.notna(val) and val:
-                    obj_type = str(val)
-                    break
+            primary_tag = None
+            tag_strength = "contextual"
 
-            osm_id_str = f"osm:{row.name}" if hasattr(row, "name") else f"osm_poi_{len(nodes) + 1}"
+            # Приоритет тегов классификации
+            if pd.notna(row.get("building")):
+                b_val = str(row.get("building")).strip()
+                obj_type = f"building_{b_val}" if b_val != "yes" else "warehouse"
+                primary_tag = f"building={b_val}"
+                if b_val == "warehouse":
+                    tag_strength = "strong"
+            elif pd.notna(row.get("industrial")):
+                ind_val = str(row.get("industrial")).strip()
+                obj_type = f"industrial_{ind_val}"
+                primary_tag = f"industrial={ind_val}"
+                if ind_val in ["warehouse", "logistics", "port"]:
+                    tag_strength = "strong"
+            elif pd.notna(row.get("harbour")) or pd.notna(row.get("port")):
+                obj_type = "port"
+                primary_tag = "harbour=yes" if pd.notna(row.get("harbour")) else f"port={row.get('port')}"
+                tag_strength = "strong"
+            elif pd.notna(row.get("railway")):
+                rw_val = str(row.get("railway")).strip()
+                obj_type = f"railway_{rw_val}"
+                primary_tag = f"railway={rw_val}"
+                tag_strength = "strong" if rw_val in ["yard", "loading_ramp"] else "contextual"
+            elif pd.notna(row.get("amenity")):
+                am_val = str(row.get("amenity")).strip()
+                obj_type = am_val
+                primary_tag = f"amenity={am_val}"
+            elif pd.notna(row.get("landuse")):
+                lu_val = str(row.get("landuse")).strip()
+                obj_type = f"landuse_{lu_val}"
+                primary_tag = f"landuse={lu_val}"
 
-            nodes.append(
-                LogisticsNode(
-                    id=f"hub_{len(nodes) + 1}_{obj_type}",
-                    name=name if name else f"Логистический комплекс #{len(nodes) + 1}",
-                    object_type=obj_type,
-                    latitude=round(float(point.y), 6),
-                    longitude=round(float(point.x), 6),
-                    region_ids=[region_id],
-                    source_osm_ids=[osm_id_str],
-                    verification_status=VerificationStatus.CANDIDATE.value,
-                    transport_modes=[TransportMode.ROAD.value],
-                )
+            osm_id_str = self._format_osm_id(row.name if hasattr(row, "name") else idx, row)
+
+            is_building = pd.notna(row.get("building"))
+            is_site = not is_building and geom.geom_type in ["Polygon", "MultiPolygon"]
+
+            identification_basis = {
+                "matched_tag": primary_tag,
+                "tag_strength": tag_strength,
+                "name_matched_keyword": matched_kw,
+            }
+
+            candidates.append({
+                "row_name": row.name if hasattr(row, "name") else idx,
+                "osm_id_str": osm_id_str,
+                "name": name if name else f"Логистический комплекс #{len(candidates) + 1}",
+                "object_type": obj_type,
+                "latitude": round(float(point.y), 6),
+                "longitude": round(float(point.x), 6),
+                "geometry": geom,
+                "is_building": is_building,
+                "is_site": is_site,
+                "identification_basis": identification_basis,
+                "verification_status": (
+                    VerificationStatus.VERIFIED.value 
+                    if tag_strength == "strong" and matched_kw 
+                    else VerificationStatus.CANDIDATE.value
+                ),
+            })
+
+        if not candidates:
+            return []
+
+        # 2. Разделение здания и комплекса (п. 3.3: Spatial Join)
+        # Проверяем вхождение зданий в полигоны площадок/территорий
+        sites = [c for c in candidates if c["is_site"]]
+        nodes: List[LogisticsNode] = []
+
+        # Формируем итоговые объекты LogisticsNode
+        for c in candidates:
+            parent_site_id: Optional[str] = None
+            graph_role = GraphRole.NODE_CANDIDATE.value
+
+            if c["is_building"] and sites:
+                # Проверяем, находится ли здание внутри какой-либо площадки
+                b_geom = c["geometry"]
+                b_pt = b_geom.representative_point() if b_geom.geom_type in ["Polygon", "MultiPolygon"] else b_geom
+                for s in sites:
+                    s_geom = s["geometry"]
+                    if s_geom.contains(b_pt) or s_geom.intersects(b_geom):
+                        parent_site_id = f"hub_site_{s['osm_id_str'].replace(':', '_').replace('/', '_')}"
+                        graph_role = GraphRole.NESTED_CANDIDATE.value
+                        c["identification_basis"]["spatial_relation"] = f"located_within:{parent_site_id}"
+                        # Добавляем отметку в родительский сайт
+                        nested_list = s["identification_basis"].setdefault("contains_buildings", [])
+                        nested_list.append(c["osm_id_str"])
+                        break
+
+            node_id = (
+                f"hub_site_{c['osm_id_str'].replace(':', '_').replace('/', '_')}"
+                if c["is_site"]
+                else f"hub_{len(nodes) + 1}_{c['object_type']}"
             )
 
-            if len(nodes) >= limit:
-                break
+            node = LogisticsNode(
+                id=node_id,
+                name=c["name"],
+                object_type=c["object_type"],
+                latitude=c["latitude"],
+                longitude=c["longitude"],
+                region_ids=[region_id],
+                source_osm_ids=[c["osm_id_str"]],
+                verification_status=c["verification_status"],
+                transport_modes=[TransportMode.ROAD.value],
+                identification_basis=c["identification_basis"],
+                parent_site_id=parent_site_id,
+                graph_role=graph_role,
+            )
+            nodes.append(node)
 
-        print(f"[+] Из OSM отфильтровано и отобрано {len(nodes)} логистических объектов-кандидатов.")
-        return nodes
+        # Сортировка: сначала самостоятельные вершины (территории и отдельные склады), затем вложенные
+        nodes.sort(key=lambda n: 0 if n.graph_role == GraphRole.NODE_CANDIDATE.value else 1)
+        selected_nodes = nodes[:limit]
+
+        print(f"[+] Из OSM отфильтровано и отобрано {len(selected_nodes)} логистических объектов "
+              f"({sum(1 for n in selected_nodes if n.graph_role == GraphRole.NODE_CANDIDATE.value)} самостоятельных, "
+              f"{sum(1 for n in selected_nodes if n.graph_role == GraphRole.NESTED_CANDIDATE.value)} вложенных в комплексы).")
+        return selected_nodes
 
     def fetch_from_osm_bbox(
         self,

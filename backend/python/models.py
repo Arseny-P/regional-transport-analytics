@@ -21,6 +21,12 @@ class VerificationStatus(str, Enum):
     EXCLUDED = "excluded"
 
 
+class GraphRole(str, Enum):
+    NODE_CANDIDATE = "node_candidate"
+    NESTED_CANDIDATE = "nested_candidate"
+    NOT_SELECTED = "not_selected"
+
+
 class TerritoryValidationError(ValueError):
     """Ошибка валидации географических координат или границ исследуемой территории."""
     pass
@@ -115,6 +121,10 @@ class LogisticsNode:
     verification_status: str = VerificationStatus.CANDIDATE.value
     transport_modes: List[str] = field(default_factory=lambda: [TransportMode.ROAD.value])
     
+    identification_basis: Dict[str, Any] = field(default_factory=dict)
+    parent_site_id: Optional[str] = None
+    graph_role: str = GraphRole.NODE_CANDIDATE.value
+
     nearest_osm_node: Optional[int] = None
     osm_node_lat: Optional[float] = None
     osm_node_lon: Optional[float] = None
@@ -149,6 +159,9 @@ class LogisticsNode:
             "source_osm_ids": self.source_osm_ids,
             "verification_status": self.verification_status,
             "transport_modes": self.transport_modes,
+            "identification_basis": self.identification_basis,
+            "parent_site_id": self.parent_site_id,
+            "graph_role": self.graph_role,
             "nearest_osm_node": self.nearest_osm_node,
             "osm_node_lat": self.osm_node_lat,
             "osm_node_lon": self.osm_node_lon,
