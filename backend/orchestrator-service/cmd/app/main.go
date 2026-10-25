@@ -29,15 +29,14 @@ func RunMigrations(dsn string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 
 	return goose.Up(db, "migrations")
 }
 
-func runApp() error {
-	cfg := config.MustLoad()
+func newLogger(logLevel, appName string) *slog.Logger {
 	var level slog.Level
-	switch strings.ToUpper(cfg.App.LogLevel) {
+	switch strings.ToUpper(logLevel) {
 	case "DEBUG":
 		level = slog.LevelDebug
 	case "INFO":
@@ -47,12 +46,17 @@ func runApp() error {
 	case "ERROR":
 		level = slog.LevelError
 	default:
-		panic("unknown log level: " + cfg.App.LogLevel)
+		panic("unknown log level: " + logLevel)
 	}
 
 	options := &slog.HandlerOptions{Level: level}
 	var handler slog.Handler = slog.NewTextHandler(os.Stdout, options)
-	logger := slog.New(handler).With("service", cfg.App.AppName)
+	return slog.New(handler).With("service", appName)
+}
+
+func runApp() error {
+	cfg := config.MustLoad()
+	logger := newLogger(cfg.App.LogLevel, cfg.App.AppName)
 	slog.SetDefault(logger)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
