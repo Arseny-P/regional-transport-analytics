@@ -420,14 +420,24 @@ class FacilityService:
     def snap_to_road_network(
         self, 
         road_graph: nx.MultiDiGraph, 
-        nodes: List[Any]
+        nodes: List[Any],
+        filter_disconnected: bool = True
     ) -> List[LogisticsNode]:
         """
-        Привязывает объекты к ближайшим узлам дорожной сети OSM.
-        Вычисляет точное геодезическое расстояние привязки (snap_distance_m).
+        Умная пространственная привязка (Smart Snapping) объектов к дорожной сети OSM:
+        1. Выделяет основную связную компоненту дорог (Largest Connected Component),
+           исключая изолированные тупики и оторванные от мира островки дорог.
+        2. Анализирует ближайшие дорожные рёбра и перекрёстки (nearest_edges + nearest_nodes).
+        3. Проверяет направленность движения (in_degree и out_degree) для исключения
+           односторонних тупиков-ловушек (sinks/sources).
+        4. Формирует устойчивый пул точек подключения (access_nodes) с разделением
+           на въездные и выездные точки.
         """
         if not nodes:
             return []
+        if len(road_graph.nodes) == 0:
+            raise ValueError("Дорожный граф пуст, невозможно выполнить привязку объектов.")
+
         if "crs" not in road_graph.graph:
             road_graph.graph["crs"] = "epsg:4326"
 
@@ -446,53 +456,142 @@ class FacilityService:
                         region_ids=n.get("region_ids", ["ru-spb"]),
                         source_osm_ids=n.get("source_osm_ids", []),
                         verification_status=n.get("verification_status", VerificationStatus.CANDIDATE.value),
-                        transport_modes=n.get("transport_modes", [TransportMode.ROAD.value])
+                        transport_modes=n.get("transport_modes", [TransportMode.ROAD.value]),
+                        identification_basis=n.get("identification_basis", {}),
+                        parent_site_id=n.get("parent_site_id"),
+                        graph_role=n.get("graph_role", GraphRole.NODE_CANDIDATE.value),
                     )
                 )
+
+        # 1. Определение основной связной компоненты (Largest Connected Component)
+        # Исключаем изолированные островки, где проезд отрезан от остальной сети
+        if filter_disconnected and len(road_graph.nodes) > 1:
+            try:
+                weak_components = list(nx.weakly_connected_components(road_graph))
+                largest_cc = max(weak_components, key=len)
+                if len(largest_cc) >= 2:
+                    active_graph = road_graph.subgraph(largest_cc)
+                else:
+                    active_graph = road_graph
+            except Exception:
+                active_graph = road_graph
+        else:
+            active_graph = road_graph
 
         lons = [n.longitude for n in log_nodes]
         lats = [n.latitude for n in log_nodes]
 
-        primary_node_ids = ox.nearest_nodes(road_graph, X=lons, Y=lats)
+        # 2. Поиск ближайших вершин в связной компоненте
+        primary_node_ids = ox.nearest_nodes(active_graph, X=lons, Y=lats)
+        if not isinstance(primary_node_ids, (list, tuple)) and not hasattr(primary_node_ids, "__iter__"):
+            primary_node_ids = [primary_node_ids]
+
+        # 3. Поиск ближайших рёбер в связной компоненте (если есть рёбра)
+        nearest_edge_tuples = []
+        if len(active_graph.edges) > 0:
+            try:
+                edge_res = ox.nearest_edges(active_graph, X=lons, Y=lats)
+                if len(log_nodes) == 1 and not isinstance(edge_res, (list, tuple)):
+                    nearest_edge_tuples = [edge_res]
+                else:
+                    nearest_edge_tuples = list(edge_res)
+            except Exception:
+                nearest_edge_tuples = [None] * len(log_nodes)
+        else:
+            nearest_edge_tuples = [None] * len(log_nodes)
 
         snapped_nodes: List[LogisticsNode] = []
-        for node, primary_id in zip(log_nodes, primary_node_ids):
+
+        for idx, (node, primary_id) in enumerate(zip(log_nodes, primary_node_ids)):
             primary_id_native = int(primary_id)
-
-            # Собираем пул кандидатов на подключение: первичный узел + его топологические соседи
             candidate_pool = {primary_id_native}
-            
-            # Добавляем соседей и предшественников (связанные улицы перекрестка)
-            if primary_id_native in road_graph:
-                for neighbor in road_graph.successors(primary_id_native):
-                    candidate_pool.add(int(neighbor))
-                for predecessor in road_graph.predecessors(primary_id_native):
-                    candidate_pool.add(int(predecessor))
 
-            # Считаем точные геодезические расстояния от объекта до каждого кандидата
-            candidate_distances = []
+            # Добавляем концы ближайшего дорожного сегмента (u, v)
+            if idx < len(nearest_edge_tuples) and nearest_edge_tuples[idx] is not None:
+                e_data = nearest_edge_tuples[idx]
+                if isinstance(e_data, tuple) and len(e_data) >= 2:
+                    u_cand, v_cand = int(e_data[0]), int(e_data[1])
+                    if u_cand in road_graph:
+                        candidate_pool.add(u_cand)
+                    if v_cand in road_graph:
+                        candidate_pool.add(v_cand)
+
+            # Добавляем топологических соседей (successors и predecessors)
+            nodes_to_expand = list(candidate_pool)
+            for cid in nodes_to_expand:
+                if cid in road_graph:
+                    for neighbor in road_graph.successors(cid):
+                        candidate_pool.add(int(neighbor))
+                    for predecessor in road_graph.predecessors(cid):
+                        candidate_pool.add(int(predecessor))
+
+            # Считаем точные геодезические расстояния и проверяем directed-степени
+            candidate_details = []
             for cand_id in candidate_pool:
                 if cand_id in road_graph.nodes:
                     cand_data = road_graph.nodes[cand_id]
                     c_lat = float(cand_data.get("y"))
                     c_lon = float(cand_data.get("x"))
                     d = ox.distance.great_circle(node.latitude, node.longitude, c_lat, c_lon)
-                    candidate_distances.append((cand_id, d, c_lat, c_lon))
 
-            # Сортируем по близости к объекту и берем до 5 лучших кандидатов
-            candidate_distances.sort(key=lambda x: x[1])
-            best_candidates = candidate_distances[:5]
+                    in_deg = road_graph.in_degree(cand_id)
+                    out_deg = road_graph.out_degree(cand_id)
 
-            best_node_id, best_dist, best_lat, best_lon = best_candidates[0]
+                    # Штраф за тупик/одностороннее ограничение при выборе основного узла:
+                    # Если узел сквозной (in > 0 и out > 0), штраф 0.
+                    # Если тупик (въезд есть, а выезда нет, или наоборот), штраф 100 метров,
+                    # чтобы при наличии сквозного перекрестка рядом предпочесть его.
+                    is_transit = (in_deg > 0 and out_deg > 0)
+                    penalty = 0.0 if is_transit else 100.0
+                    score = d + penalty
+
+                    candidate_details.append({
+                        "id": cand_id,
+                        "dist": d,
+                        "score": score,
+                        "lat": c_lat,
+                        "lon": c_lon,
+                        "in_deg": in_deg,
+                        "out_deg": out_deg,
+                        "is_transit": is_transit,
+                    })
+
+            # Сортируем кандидатов по качеству (score) для выбора основного узла
+            candidate_details.sort(key=lambda x: (x["score"], x["dist"]))
+
+            best_cand = candidate_details[0]
+            best_node_id = best_cand["id"]
+            best_dist = best_cand["dist"]
+            best_lat = best_cand["lat"]
+            best_lon = best_cand["lon"]
 
             node.nearest_osm_node = best_node_id
             node.osm_node_lat = best_lat
             node.osm_node_lon = best_lon
             node.snap_distance_m = round(float(best_dist), 1)
-            node.access_nodes = [item[0] for item in best_candidates]
 
+            # Формируем пул access_nodes:
+            # Отбираем до 5 лучших узлов, при этом приоритизируя сквозные и распределяя
+            # кандидатов так, чтобы были как точки выезда (out > 0), так и точки въезда (in > 0).
+            access_pool: List[int] = []
+            access_pool.append(best_node_id)
+
+            remaining = sorted(
+                [c for c in candidate_details if c["id"] != best_node_id],
+                key=lambda x: (not x["is_transit"], x["dist"])
+            )
+            for c in remaining:
+                if len(access_pool) >= 5:
+                    break
+                access_pool.append(c["id"])
+
+            node.access_nodes = access_pool
             snapped_nodes.append(node)
+
             warning_tag = " [!] ДАЛЕКО" if best_dist > 1000 else ""
-            print(f"  [Snap] '{node.name}' -> {len(node.access_nodes)} точек подключения (осн. узел {best_node_id}, плечо: {node.snap_distance_m} м){warning_tag}")
+            transit_tag = " (сквозной)" if best_cand["is_transit"] else " (тупик/односторонний)"
+            print(f"  [SmartSnap] '{node.name}' -> {len(node.access_nodes)} точек подключения "
+                  f"(осн. узел {best_node_id}{transit_tag}, плечо: {node.snap_distance_m} м){warning_tag}")
 
         return snapped_nodes
+
