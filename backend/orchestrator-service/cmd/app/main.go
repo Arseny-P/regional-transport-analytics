@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,12 +15,24 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/pressly/goose/v3"
 	"github.com/segmentio/kafka-go"
 
 	"orchestrator-service/config"
 )
+
+func RunMigrations(dsn string) error {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	return goose.Up(db, "migrations")
+}
 
 func runApp() error {
 	cfg := config.MustLoad()
@@ -61,6 +74,10 @@ func runApp() error {
 		return fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 	logger.Info("PostgreSQL connected")
+	if err = RunMigrations(cfg.Postgres.DSN); err != nil {
+		return fmt.Errorf("apply PostgreSQL migrations: %w", err)
+	}
+	logger.Info("PostgreSQL migrations applied")
 
 	minioClient, err := minio.New(cfg.MinIO.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, ""),
