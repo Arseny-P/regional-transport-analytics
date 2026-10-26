@@ -48,7 +48,7 @@ migrate-up:
 	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations up
 
 migrate-down:
-	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations down
+	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations down-to 0
 
 migrate-status:
 	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations status
