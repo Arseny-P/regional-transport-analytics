@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -14,17 +15,28 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/pressly/goose/v3"
 	"github.com/segmentio/kafka-go"
 
 	"orchestrator-service/config"
 )
 
-func runApp() error {
-	cfg := config.MustLoad()
+func RunMigrations(dsn string) error {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+
+	return goose.Up(db, "migrations")
+}
+
+func newLogger(logLevel, appName string) *slog.Logger {
 	var level slog.Level
-	switch strings.ToUpper(cfg.App.LogLevel) {
+	switch strings.ToUpper(logLevel) {
 	case "DEBUG":
 		level = slog.LevelDebug
 	case "INFO":
@@ -34,12 +46,17 @@ func runApp() error {
 	case "ERROR":
 		level = slog.LevelError
 	default:
-		panic("unknown log level: " + cfg.App.LogLevel)
+		panic("unknown log level: " + logLevel)
 	}
 
 	options := &slog.HandlerOptions{Level: level}
 	var handler slog.Handler = slog.NewTextHandler(os.Stdout, options)
-	logger := slog.New(handler).With("service", cfg.App.AppName)
+	return slog.New(handler).With("service", appName)
+}
+
+func runApp() error {
+	cfg := config.MustLoad()
+	logger := newLogger(cfg.App.LogLevel, cfg.App.AppName)
 	slog.SetDefault(logger)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -61,6 +78,10 @@ func runApp() error {
 		return fmt.Errorf("connect PostgreSQL: %w", err)
 	}
 	logger.Info("PostgreSQL connected")
+	if err = RunMigrations(cfg.Postgres.DSN); err != nil {
+		return fmt.Errorf("apply PostgreSQL migrations: %w", err)
+	}
+	logger.Info("PostgreSQL migrations applied")
 
 	minioClient, err := minio.New(cfg.MinIO.Endpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinIO.AccessKey, cfg.MinIO.SecretKey, ""),
