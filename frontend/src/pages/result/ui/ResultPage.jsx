@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import Layout from '../layout/Layout';
+import { Layout } from '@/widgets/layout';
 import {
   DEFAULT_TRANSPORT_MODE,
   TRANSPORT_MODES,
