@@ -4,18 +4,32 @@
   height: 100%;
 }
 
+/* Название меню */
+
 .title {
   margin-top: 0;
   margin-bottom: 16px;
+  font-family: Arial, sans-serif;
 }
+
+/* Описание */
+
+.dotsDescription {
+  line-height: 1.5;
+  font-family: Arial, sans-serif;
+}
+
+/* Ввод координат */
 
 .input {
   width: 100%;
-  margin-top: 4px;
-  padding: 6px 8px;
-  border: 1px solid #ccc;
+  margin-top: 2px;
+  padding: 6px 4px;
+  border: 1px solid #4d4d4d;
   border-radius: 6px;
   box-sizing: border-box;
+  font-family: Arial, sans-serif;
+  margin-bottom: 4px;
 }
 
 .transports {
@@ -24,11 +38,13 @@
 
 .transportsTitle {
   margin-bottom: 8px;
+  font-family: Arial, sans-serif;
 }
 
 .transport {
   display: block;
   margin-bottom: 6px;
+  font-family: Arial, sans-serif;
 }
 
 .actions {
@@ -68,4 +84,22 @@
 .runButton:disabled {
   background-color: #8d8d8d;
   cursor: not-allowed;
+}
+
+.coordinates {
+  display: flex;
+  flex-direction: column;
+}
+
+.coordinates h4 {
+  margin-bottom:6px;
+  font-family: Arial, sans-serif;
+}
+
+.coordinates label {
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  font-family: Arial, sans-serif;
+
 }
