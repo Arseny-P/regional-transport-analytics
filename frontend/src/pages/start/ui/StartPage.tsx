@@ -2,6 +2,7 @@ import { Layout } from '@/widgets/layout';
 import styles from './StartPage.module.css';
 import { MapView } from '@/widgets/map-view';
 import { useNavigate } from 'react-router-dom';
+import { Button } from '@/shared/ui/button';
 
 
 
@@ -20,13 +21,11 @@ export function StartPage() {
         <p>Перетащите GeoJSON сюда</p>
 
         {/* На данный момент просто переносит на страницу выбора точек */}
-        <button 
-            type="button" 
-            className={styles.button}
+        <Button 
             onClick={() => navigate('/analysis')}
         >
           Выбрать файл 
-        </button>
+        </Button>
       </div>
 
       <p className={styles.hint}>

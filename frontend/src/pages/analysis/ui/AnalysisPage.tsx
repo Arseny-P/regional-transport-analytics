@@ -4,6 +4,7 @@ import { Layout } from '@/widgets/layout';
 import { MapView } from '@/widgets/map-view';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
+import { Button } from '@/shared/ui/button';
 import type { BBox } from '@/entities/area';
 import {
   DEFAULT_TRANSPORT_MODES,
@@ -97,7 +98,7 @@ export function AnalysisPage() {
       </div>
 
       <div className={styles.transports}>
-        <h3 className={styles.transportsTitle}>Виды транспорта:</h3>
+        <h3 className={styles.title}>Виды транспорта:</h3>
         {TRANSPORT_MODES.map((mode) => (
           <label key={mode} className={styles.transport}>
             <input
@@ -143,10 +144,10 @@ export function AnalysisPage() {
         >
           {isLoading ? 'Запуск анализа...' : 'Начать анализ'}
         </button> */}
-        <button onClick= {navigateToResult} 
+        <Button onClick= {navigateToResult} 
         className={styles.newAnalysisButton}>
           Анализ
-        </button>
+        </Button>
       </div>
 
     
