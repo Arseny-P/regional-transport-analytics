@@ -1,5 +1,5 @@
 import { API_URL } from '@/shared/config';
-import type { ApiErrorBody, BBoxTuple, QueryParams } from './types';
+import type { ApiErrorBody, QueryParams } from './types';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -26,10 +26,6 @@ export function buildUrl(path: string, params: QueryParams = {}): string {
   }
   const query = search.toString();
   return `${API_URL}/${path.replace(/^\/+/, '')}${query ? `?${query}` : ''}`;
-}
-
-export function bboxToQuery([west, south, east, north]: BBoxTuple): QueryParams {
-  return { west, south, east, north };
 }
 
 async function toApiError(response: Response): Promise<ApiError> {

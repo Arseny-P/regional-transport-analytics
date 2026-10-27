@@ -1,2 +1,2 @@
-export { ApiError, bboxToQuery, buildUrl, request } from './client';
-export type { ApiErrorBody, BBoxTuple, Position, QueryParams } from './types';
+export { ApiError, buildUrl, request } from './client';
+export type { ApiErrorBody, Position, QueryParams } from './types';

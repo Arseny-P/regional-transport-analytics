@@ -1,0 +1,71 @@
+.page {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.title {
+  margin-top: 0;
+  margin-bottom: 16px;
+}
+
+.input {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.transports {
+  margin-top: 20px;
+}
+
+.transportsTitle {
+  margin-bottom: 8px;
+}
+
+.transport {
+  display: block;
+  margin-bottom: 6px;
+}
+
+.actions {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  background-color: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  transform: translateX(-50%);
+}
+
+.hint {
+  font-weight: bold;
+}
+
+.error {
+  color: #da1e28;
+}
+
+.runButton {
+  padding: 10px 20px;
+  border: none;
+  border-radius: 8px;
+  background-color: #0f62fe;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.runButton:disabled {
+  background-color: #8d8d8d;
+  cursor: not-allowed;
+}
