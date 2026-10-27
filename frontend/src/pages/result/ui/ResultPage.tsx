@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Layout } from '@/widgets/layout';
+import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 import { MetricSelect } from '@/features/select-metric';
 import { GraphLayer, isFinalState, useAnalysisJob, type JobState } from '@/entities/analysis';
@@ -31,9 +31,8 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 
   return (
     <div className={styles.page}>
-      <Layout sidebarContent={sidebarContent}>
-        <div className={styles.content}>{children}</div>
-      </Layout>
+      <AppSidebar>{sidebarContent}</AppSidebar>
+      <div className={styles.content}>{children}</div>
     </div>
   );
 }

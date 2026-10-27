@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Layout } from '@/widgets/layout';
+import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
@@ -122,17 +122,16 @@ export function AnalysisPage() {
 
   return (
     <div className={styles.page}>
-      <Layout sidebarContent={sidebarContent}>
-        <MapView>
-          <SelectArea
-            onChange={setSelectedArea}
-            point1={point1}
-            point2={point2}
-            setPoint1={setPoint1}
-            setPoint2={setPoint2}
-          />
-        </MapView>
-      </Layout>
+      <AppSidebar>{sidebarContent}</AppSidebar>
+      <MapView>
+        <SelectArea
+          onChange={setSelectedArea}
+          point1={point1}
+          point2={point2}
+          setPoint1={setPoint1}
+          setPoint2={setPoint2}
+        />
+      </MapView>
 
       <div className={styles.actions}>
         <span className={styles.hint}>{hint}</span>
