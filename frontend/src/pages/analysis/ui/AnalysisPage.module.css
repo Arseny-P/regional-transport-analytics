@@ -4,31 +4,46 @@
   height: 100%;
 }
 
+/* Название меню */
+
 .title {
   margin-top: 0;
   margin-bottom: 16px;
+  font-family: Arial, sans-serif;
+  color: #243746;
 }
+
+/* Описание */
+
+.dotsDescription {
+  line-height: 1.5;
+  font-family: Arial, sans-serif;
+}
+
+/* Ввод координат */
 
 .input {
   width: 100%;
-  margin-top: 4px;
-  padding: 6px 8px;
-  border: 1px solid #ccc;
+  margin-top: 2px;
+  padding: 6px 4px;
+  border: 1px solid #D8E1E6;
   border-radius: 6px;
   box-sizing: border-box;
+  font-family: Arial, sans-serif;
+  margin-bottom: 4px;
+  color: #5C6F7B;
 }
 
 .transports {
   margin-top: 20px;
 }
 
-.transportsTitle {
-  margin-bottom: 8px;
-}
 
 .transport {
   display: block;
   margin-bottom: 6px;
+  font-family: Arial, sans-serif;
+  color: #243746;
 }
 
 .actions {
@@ -43,29 +58,34 @@
   padding: 10px 16px;
   border-radius: 8px;
   background-color: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   transform: translateX(-50%);
 }
 
 .hint {
   font-weight: bold;
+  font-family: Arial, sans-serif;
 }
 
 .error {
   color: #da1e28;
 }
 
-.runButton {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
-  background-color: #0f62fe;
-  color: white;
-  font-weight: bold;
-  cursor: pointer;
+.coordinates {
+  display: flex;
+  flex-direction: column;
 }
 
-.runButton:disabled {
-  background-color: #8d8d8d;
-  cursor: not-allowed;
+.coordinates h4 {
+  margin-bottom:6px;
+  font-family: Arial, sans-serif;
+  color: #243746;
 }
+
+.coordinates label {
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  font-family: Arial, sans-serif;
+  color: #243746;
+}
+
