@@ -1,0 +1,64 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  font-family: Arial, sans-serif;
+}
+
+.title {
+  margin: 0;
+  font-size: 22px;
+}
+
+.description {
+  margin: 0;
+  color: #555555;
+  line-height: 1.5;
+  font-family: Arial, sans-serif;
+}
+
+.uploadZone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+
+  padding: 32px 20px;
+  border: 1px double #636363;
+  border-radius: 0px;
+  text-align: center;
+  font-family: Arial, sans-serif;
+}
+
+.uploadZone p {
+  margin: 0;
+}
+
+.button {
+  padding: 12px 20px;
+  border-radius: 0px;
+  background-color: #e9e9e9;
+  color: #555353;
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid #aaaaaa;
+  font-family: Arial, sans-serif;
+}
+
+
+.hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #666666;
+  font-family: Arial, sans-serif;
+}
+
+.mapPlaceholder {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background-color: #555353;
+  color: #666666;
+  font-family: Arial, sans-serif;
+}
