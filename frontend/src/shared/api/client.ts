@@ -3,17 +3,20 @@ import type { ApiErrorBody, BBoxTuple, QueryParams } from './types';
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code: string | undefined;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code?: string) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
   }
 }
 
 interface RequestOptions {
   method?: 'GET' | 'POST';
   params?: QueryParams;
+  body?: unknown;
 }
 
 export function buildUrl(path: string, params: QueryParams = {}): string {
@@ -29,19 +32,26 @@ export function bboxToQuery([west, south, east, north]: BBoxTuple): QueryParams 
   return { west, south, east, north };
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function toApiError(response: Response): Promise<ApiError> {
   const body: ApiErrorBody | null = await response.json().catch(() => null);
-  const detail = body?.detail;
-  if (typeof detail === 'string') return detail;
-  if (Array.isArray(detail) && detail[0]) return detail[0].msg;
-  return `Ошибка сервера: ${response.status}`;
+  return new ApiError(
+    response.status,
+    body?.message ?? `Ошибка сервера: ${response.status}`,
+    body?.code
+  );
 }
 
 export async function request<T>(
   path: string,
-  { method = 'GET', params }: RequestOptions = {}
+  { method = 'GET', params, body }: RequestOptions = {}
 ): Promise<T> {
-  const response = await fetch(buildUrl(path, params), { method });
-  if (!response.ok) throw new ApiError(response.status, await readErrorMessage(response));
+  const response = await fetch(buildUrl(path, params), {
+    method,
+    ...(body !== undefined && {
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }),
+  });
+  if (!response.ok) throw await toApiError(response);
   return response.json() as Promise<T>;
 }
