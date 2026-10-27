@@ -27,7 +27,7 @@ const layerPolicy = (layer, index) => ({
 });
 
 export default defineConfig([
-  globalIgnores(['dist']),
+  globalIgnores(['dist', 'public/mockServiceWorker.js']),
   {
     files: ['**/*.{js,jsx}'],
     extends: [
