@@ -60,13 +60,17 @@ src/
 ## 4. План дальнейшей миграции
 
 1. **`shared/api` + `shared/config/env`.** Вынести базовый URL backend в `VITE_API_URL` (`.env`, `.env.example`). Сделать типизированный клиент и описать типы ответов `/analyze`, `/map`, `/metrics`;
-2. **`entities/transport-mode`.** Тип `TransportMode = "auto" | "aero" | "sea" | "rail" | "all"` и подписи режимов (сейчас дублируются в двух страницах);
+2. **`entities/transport-mode`.** Тип `TransportMode = "road" | "rail" | "sea"` по контракту `backend/api/openapi.yaml` и подписи режимов;
 3. **`widgets/app-layout`.** Перенести `layout/Layout.jsx`, убрав двойное оборачивание (см. ниже);
 4. **`shared/ui`.** Спиннер, кнопки и оверлей загрузки вместо повторяющихся inline-стилей;
-5. **`features/run-analysis`, `pages/analysis`.** Запрос анализа и форма координат и режима;
-6. **`features/select-metric`, `pages/result`**;
+5. **`features/run-analysis`, `pages/analysis`.** Создание задачи `POST /analysis` с `job_id`, сгенерированным на frontend, форма координат и видов транспорта;
+6. **`entities/analysis`, `features/select-metric`, `pages/result`.** Heartbeat и получение результата по `job_id` из URL (`/result?job_id=...`), граф на карте, выбор метрики;
 7. **`app/`.** Перенести `App`, роутер, `index.css`, `leafletIcons`,`main.jsx` → `main.tsx`;
 8. **Выключить `allowJs`**, когда JS-файлов не останется. Удалить неиспользуемый `leaflet-draw`.
+
+### Моки API
+
+Пока Go API не готов, в dev-режиме запросы `/analysis*` перехватывает MSW (`src/app/mocks`). Моки включаются переменной `VITE_API_MOCKS=true` в `.env`.
 
 ## 5. Найденные проблемы (исправить в ходе миграции)
 
