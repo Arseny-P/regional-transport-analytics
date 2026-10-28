@@ -1,10 +1,10 @@
 import unittest
-from models import (
+from graph_service.domain import (
     TerritoryBounds,
     TerritoryValidationError,
     FacilityValidationError,
 )
-from services import FacilityService
+from graph_service.algorithms import FacilityService
 
 
 class TestValidation(unittest.TestCase):

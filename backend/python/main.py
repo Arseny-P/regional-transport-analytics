@@ -4,7 +4,11 @@ import json
 import argparse
 from typing import Optional, List, Dict, Any
 
-from models import (
+_src_dir = os.path.join(os.path.dirname(__file__), "src")
+if _src_dir not in sys.path:
+    sys.path.insert(0, _src_dir)
+
+from graph_service.domain import (
     AnalysisRequest,
     AnalysisResponse,
     TerritoryBounds,
@@ -12,7 +16,7 @@ from models import (
     FacilitySourceType,
     AnalysisStatus,
 )
-from services import TerritoryAnalysisService
+from graph_service.application import TerritoryAnalysisService
 
 
 def parse_args():

@@ -1,7 +1,7 @@
 import unittest
 import networkx as nx
-from models import LogisticsNode, VerificationStatus
-from services.facility_service import FacilityService
+from graph_service.domain import LogisticsNode, VerificationStatus
+from graph_service.algorithms import FacilityService
 
 
 class TestSmartSnapping(unittest.TestCase):
