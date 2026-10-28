@@ -155,6 +155,56 @@ class TestSmartSnapping(unittest.TestCase):
         path_through = nx.shortest_path(G, 1, 2, weight="length")
         self.assertIn(virt_node, path_through)
 
+    def test_max_snap_distance_threshold(self):
+        """
+        Проверяет, что объекты дальше установленного порога (например, 500м в акватории)
+        помечаются как изолированные и не получают доступ к дорожной сети.
+        """
+        G = nx.MultiDiGraph()
+        G.graph["crs"] = "epsg:4326"
+
+        # Дорога около (59.000, 30.000) - (59.000, 30.010)
+        G.add_node(1, x=30.000, y=59.000)
+        G.add_node(2, x=30.010, y=59.000)
+        G.add_edge(1, 2, key=0, length=500)
+        G.add_edge(2, 1, key=0, length=500)
+
+        # 1. Близкий объект (~100м к северу)
+        close_facility = LogisticsNode(
+            id="close_hub",
+            name="Близкий склад",
+            object_type="warehouse",
+            latitude=59.001,
+            longitude=30.005,
+        )
+
+        # 2. Далекий объект в море (~700м к югу)
+        far_facility = LogisticsNode(
+            id="far_port_sea",
+            name="Точка в заливе (Каботажная гавань)",
+            object_type="port",
+            latitude=58.993,
+            longitude=30.005,
+        )
+
+        snapped = self.facility_service.snap_to_road_network(
+            G, [close_facility, far_facility], filter_disconnected=False, max_snap_distance_m=500.0
+        )
+
+        self.assertEqual(len(snapped), 2)
+
+        # Близкий объект успешно подключен
+        self.assertFalse(snapped[0].is_isolated)
+        self.assertGreater(len(snapped[0].access_nodes), 0)
+        self.assertLess(snapped[0].snap_distance_m, 500.0)
+
+        # Далекий морской объект изолирован
+        self.assertTrue(snapped[1].is_isolated)
+        self.assertEqual(len(snapped[1].access_nodes), 0)
+        self.assertIsNone(snapped[1].nearest_osm_node)
+        self.assertGreater(snapped[1].snap_distance_m, 500.0)
+        self.assertIn("Превышен лимит расстояния", snapped[1].isolation_reason)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -72,6 +72,12 @@ def parse_args():
         help="Количество k-ближайших соседей для разреживания логистического графа (k-NN)",
     )
     parser.add_argument(
+        "--max-snap-distance",
+        type=float,
+        default=None,
+        help="Максимальное допустимое расстояние привязки объекта к дороге в метрах (по умолчанию: без ограничений)",
+    )
+    parser.add_argument(
         "--refetch",
         action="store_true",
         help="Принудительно перезагрузить дорожную сеть из OSM, игнорируя локальный кэш",
@@ -122,6 +128,8 @@ def main():
             request.refetch = True
         if args.knn is not None:
             request.knn = args.knn
+        if args.max_snap_distance is not None:
+            request.max_snap_distance_m = args.max_snap_distance
 
         response = service.run_analysis(request)
 
@@ -202,6 +210,7 @@ def main():
         facility_source=facility_source,
         facilities=user_facilities,
         osm_facilities_limit=args.osm_limit,
+        max_snap_distance_m=args.max_snap_distance,
         knn=args.knn,
         output_dir=args.data_dir,
         output_alias=output_alias,

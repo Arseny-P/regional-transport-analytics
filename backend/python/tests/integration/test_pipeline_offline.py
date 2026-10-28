@@ -85,6 +85,13 @@ class TestPipelineOffline(unittest.TestCase):
         self.assertIn("transport_route", feature_types)
         self.assertIn("access_connector", feature_types)
 
+        # Проверка, что маршруты идут строго по дорожному полотну
+        routes = [f for f in geojson["features"] if f["properties"].get("feature_type") == "transport_route"]
+        self.assertGreater(len(routes), 0)
+        for r in routes:
+            self.assertTrue(r["properties"].get("is_strictly_road"))
+            self.assertGreater(r["properties"].get("road_distance_m", 0), 0)
+
         # 6. Проверка оффлайн-восстановления из GraphML
         restored_graph = self.logistics_service.load_graphml(filename=f"{alias}_logistics")
         self.assertEqual(len(restored_graph.nodes), summary["total_hubs"])

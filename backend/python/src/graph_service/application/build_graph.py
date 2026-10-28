@@ -173,7 +173,11 @@ class TerritoryAnalysisService:
         # 4. Привязка объектов к дорожной сети (Snapping)
         # -----------------------------------------------------------------
         try:
-            snapped_nodes = facility_service.snap_to_road_network(road_graph=road_graph, nodes=all_nodes)
+            snapped_nodes = facility_service.snap_to_road_network(
+                road_graph=road_graph, 
+                nodes=all_nodes,
+                max_snap_distance_m=request.max_snap_distance_m,
+            )
         except Exception as snap_err:
             return AnalysisResponse(
                 status=AnalysisStatus.ERROR.value,

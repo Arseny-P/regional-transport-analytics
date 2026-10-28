@@ -520,7 +520,8 @@ class FacilityService:
         self, 
         road_graph: nx.MultiDiGraph, 
         nodes: List[Any],
-        filter_disconnected: bool = True
+        filter_disconnected: bool = True,
+        max_snap_distance_m: Optional[float] = None,
     ) -> List[LogisticsNode]:
         """
         Умная пространственная привязка (Smart Snapping) объектов к дорожной сети OSM:
@@ -737,14 +738,31 @@ class FacilityService:
                         break
                     access_pool.append(c["id"])
 
+            if max_snap_distance_m is not None and best_dist > max_snap_distance_m:
+                node.nearest_osm_node = None
+                node.osm_node_lat = None
+                node.osm_node_lon = None
+                node.snap_distance_m = round(float(best_dist), 1)
+                node.access_nodes = []
+                node.is_isolated = True
+                node.isolation_reason = (
+                    f"Превышен лимит расстояния до автодороги: {round(float(best_dist), 1)} м > {max_snap_distance_m:.1f} м "
+                    f"(объект в акватории или нет подъездных путей)"
+                )
+                snapped_nodes.append(node)
+                print(f"  [SmartSnap] '{node.name}' -> [!] ИЗОЛИРОВАН: расстояние до дорожной сети {node.snap_distance_m} м > {max_snap_distance_m:.1f} м (морская акватория / нет автодорог)")
+                continue
+
             node.nearest_osm_node = best_node_id
             node.osm_node_lat = best_lat
             node.osm_node_lon = best_lon
             node.snap_distance_m = round(float(best_dist), 1)
             node.access_nodes = access_pool
+            node.is_isolated = False
+            node.isolation_reason = None
             snapped_nodes.append(node)
 
-            warning_tag = " [!] ДАЛЕКО" if best_dist > 1000 else ""
+            warning_tag = " [!] ДАЛЕКО" if best_dist > 300 else ""
             tag = " (виртуальный узел на ребре)" if best_node_id >= 9_000_000_000 else " (перекресток)"
             print(f"  [SmartSnap] '{node.name}' -> {len(node.access_nodes)} точек подключения "
                   f"(осн. узел {best_node_id}{tag}, плечо: {node.snap_distance_m} м){warning_tag}")

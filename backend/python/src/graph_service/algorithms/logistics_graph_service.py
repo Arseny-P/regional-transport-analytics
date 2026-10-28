@@ -22,6 +22,12 @@ class LogisticsGraphService:
         """
         Склеивает последовательные сегменты ребер пути в единую непрерывную геометрию LineString.
         """
+        if not path:
+            return LineString()
+        if len(path) == 1:
+            pt = (float(road_graph.nodes[path[0]]["x"]), float(road_graph.nodes[path[0]]["y"]))
+            return LineString([pt, pt])
+
         lines = []
         for u, v in zip(path[:-1], path[1:]):
             edge_data = road_graph[u][v][0]
@@ -32,13 +38,23 @@ class LogisticsGraphService:
                 p2 = (float(road_graph.nodes[v]["x"]), float(road_graph.nodes[v]["y"]))
                 lines.append(LineString([p1, p2]))
 
+        if not lines:
+            pt = (float(road_graph.nodes[path[0]]["x"]), float(road_graph.nodes[path[0]]["y"]))
+            return LineString([pt, pt])
+
         merged = linemerge(lines)
         if isinstance(merged, MultiLineString):
             coords = []
             for ls in merged.geoms:
                 coords.extend(ls.coords)
             return LineString(coords)
-        return merged
+        elif isinstance(merged, LineString):
+            return merged
+        else:
+            coords = []
+            for u in path:
+                coords.append((float(road_graph.nodes[u]["x"]), float(road_graph.nodes[u]["y"])))
+            return LineString(coords)
 
     def _calculate_best_route(
         self, 
@@ -171,7 +187,9 @@ class LogisticsGraphService:
                         osm_node_lat=n.get("osm_node_lat"),
                         osm_node_lon=n.get("osm_node_lon"),
                         snap_distance_m=n.get("snap_distance_m"),
-                        access_nodes=n.get("access_nodes", [n.get("nearest_osm_node")] if n.get("nearest_osm_node") else [])
+                        access_nodes=n.get("access_nodes", [n.get("nearest_osm_node")] if n.get("nearest_osm_node") else []),
+                        is_isolated=bool(n.get("is_isolated", False)),
+                        isolation_reason=n.get("isolation_reason"),
                     )
                 )
 
@@ -192,7 +210,9 @@ class LogisticsGraphService:
                 osm_node_lat=node.osm_node_lat or 0.0,
                 osm_node_lon=node.osm_node_lon or 0.0,
                 snap_distance_m=node.snap_distance_m or 0.0,
-                access_nodes=json.dumps(node.access_nodes)
+                access_nodes=json.dumps(node.access_nodes),
+                is_isolated=node.is_isolated,
+                isolation_reason=node.isolation_reason or "",
             )
 
         # Формируем список пар для проверки маршрутов
@@ -264,6 +284,7 @@ class LogisticsGraphService:
                 osm_nodes_count_ab=route_ab["nodes_count"],
                 path_osm_nodes_ab=route_ab["path"],
                 geometry_ab_wkt=route_ab["geom_wkt"],
+                road_geometry_ab_wkt=route_ab["road_geom_wkt"],
                 distance_ba_m=route_ba["distance_m"],
                 total_distance_ba_m=route_ba["total_distance_m"],
                 snap_origin_ba_m=route_ba["snap_origin_m"],
@@ -272,6 +293,7 @@ class LogisticsGraphService:
                 osm_nodes_count_ba=route_ba["nodes_count"],
                 path_osm_nodes_ba=route_ba["path"],
                 geometry_ba_wkt=route_ba["geom_wkt"],
+                road_geometry_ba_wkt=route_ba["road_geom_wkt"],
                 connection_status="candidate"
             )
 
@@ -341,79 +363,89 @@ class LogisticsGraphService:
             lat = float(data.get("latitude", 0.0))
             lon = float(data.get("longitude", 0.0))
             point_geom = Point(lon, lat)
+            is_isolated = bool(data.get("is_isolated", False))
+
+            hub_props = {
+                "feature_type": "logistics_hub",
+                "id": node_id,
+                "name": data.get("name", node_id),
+                "object_type": data.get("object_type", "facility"),
+                "verification_status": data.get("verification_status", "candidate"),
+                "graph_role": data.get("graph_role", "node_candidate"),
+                "parent_site_id": data.get("parent_site_id") or None,
+                "snap_distance_m": data.get("snap_distance_m", 0.0),
+                "nearest_osm_node": data.get("nearest_osm_node", 0),
+                "region_ids": data.get("region_ids", "ru-spb"),
+                "is_isolated": is_isolated,
+                "isolation_reason": data.get("isolation_reason", ""),
+            }
+            if is_isolated:
+                hub_props["marker-color"] = "#ef4444"
+                hub_props["status_label"] = "Изолирован (нет дорожного подъезда)"
 
             features.append({
                 "type": "Feature",
                 "geometry": mapping(point_geom),
-                "properties": {
-                    "feature_type": "logistics_hub",
-                    "id": node_id,
-                    "name": data.get("name", node_id),
-                    "object_type": data.get("object_type", "facility"),
-                    "verification_status": data.get("verification_status", "candidate"),
-                    "graph_role": data.get("graph_role", "node_candidate"),
-                    "parent_site_id": data.get("parent_site_id") or None,
-                    "snap_distance_m": data.get("snap_distance_m", 0.0),
-                    "nearest_osm_node": data.get("nearest_osm_node", 0),
-                    "region_ids": data.get("region_ids", "ru-spb")
-                }
+                "properties": hub_props
             })
 
         # Множество добавленных коннекторов доступа (для исключения дубликатов на карте)
         added_connectors = set()
 
         for u, v, key, data in log_graph.edges(keys=True, data=True):
-            # Линия A -> B
-            geom_ab = data.get("geometry_ab_wkt")
+            # Линия A -> B (строго по дорожному полотну)
+            geom_ab = data.get("road_geometry_ab_wkt") or data.get("geometry_ab_wkt")
             if geom_ab and data.get("route_status_ab") == RouteStatus.FOUND.value:
                 line_geom = wkt.loads(geom_ab) if isinstance(geom_ab, str) else geom_ab
-                features.append({
-                    "type": "Feature",
-                    "geometry": mapping(line_geom),
-                    "properties": {
-                        "feature_type": "transport_route",
-                        "transport_mode": key,
-                        "direction": "ab",
-                        "source_id": u,
-                        "target_id": v,
-                        "source_name": data.get("node_a_name", u),
-                        "target_name": data.get("node_b_name", v),
-                        "road_distance_m": data.get("distance_ab_m"),
-                        "total_distance_m": data.get("total_distance_ab_m") or data.get("distance_ab_m"),
-                        "distance_m": data.get("total_distance_ab_m") or data.get("distance_ab_m"),
-                        "snap_origin_m": data.get("snap_origin_ab_m", 0.0),
-                        "snap_dest_m": data.get("snap_dest_ab_m", 0.0),
-                        "osm_nodes_count": data.get("osm_nodes_count_ab"),
-                        "is_door_to_door": True,
-                        "title": f"{data.get('node_a_name', u)} → {data.get('node_b_name', v)}"
-                    }
-                })
+                if not line_geom.is_empty and line_geom.length > 0:
+                    features.append({
+                        "type": "Feature",
+                        "geometry": mapping(line_geom),
+                        "properties": {
+                            "feature_type": "transport_route",
+                            "transport_mode": key,
+                            "direction": "ab",
+                            "source_id": u,
+                            "target_id": v,
+                            "source_name": data.get("node_a_name", u),
+                            "target_name": data.get("node_b_name", v),
+                            "road_distance_m": data.get("distance_ab_m"),
+                            "total_distance_m": data.get("total_distance_ab_m") or data.get("distance_ab_m"),
+                            "distance_m": data.get("distance_ab_m"),
+                            "snap_origin_m": data.get("snap_origin_ab_m", 0.0),
+                            "snap_dest_m": data.get("snap_dest_ab_m", 0.0),
+                            "osm_nodes_count": data.get("osm_nodes_count_ab"),
+                            "is_strictly_road": True,
+                            "title": f"{data.get('node_a_name', u)} → {data.get('node_b_name', v)}"
+                        }
+                    })
 
-            # Линия B -> A
-            geom_ba = data.get("geometry_ba_wkt")
+            # Линия B -> A (строго по дорожному полотну)
+            geom_ba = data.get("road_geometry_ba_wkt") or data.get("geometry_ba_wkt")
             if geom_ba and data.get("route_status_ba") == RouteStatus.FOUND.value:
                 line_geom = wkt.loads(geom_ba) if isinstance(geom_ba, str) else geom_ba
-                features.append({
-                    "type": "Feature",
-                    "geometry": mapping(line_geom),
-                    "properties": {
-                        "feature_type": "transport_route",
-                        "transport_mode": key,
-                        "direction": "ba",
-                        "source_id": v,
-                        "target_id": u,
-                        "source_name": data.get("node_b_name", v),
-                        "target_name": data.get("node_a_name", u),
-                        "road_distance_m": data.get("distance_ba_m"),
-                        "total_distance_m": data.get("total_distance_ba_m") or data.get("distance_ba_m"),
-                        "distance_m": data.get("total_distance_ba_m") or data.get("distance_ba_m"),
-                        "snap_origin_m": data.get("snap_origin_ba_m", 0.0),
-                        "snap_dest_m": data.get("snap_dest_ba_m", 0.0),
-                        "osm_nodes_count": data.get("osm_nodes_count_ba"),
-                        "is_door_to_door": True,
-                        "title": f"{data.get('node_b_name', v)} → {data.get('node_a_name', u)}"
-                    }
-                })
+                if not line_geom.is_empty and line_geom.length > 0:
+                    features.append({
+                        "type": "Feature",
+                        "geometry": mapping(line_geom),
+                        "properties": {
+                            "feature_type": "transport_route",
+                            "transport_mode": key,
+                            "direction": "ba",
+                            "source_id": v,
+                            "target_id": u,
+                            "source_name": data.get("node_b_name", v),
+                            "target_name": data.get("node_a_name", u),
+                            "road_distance_m": data.get("distance_ba_m"),
+                            "total_distance_m": data.get("total_distance_ba_m") or data.get("distance_ba_m"),
+                            "distance_m": data.get("distance_ba_m"),
+                            "snap_origin_m": data.get("snap_origin_ba_m", 0.0),
+                            "snap_dest_m": data.get("snap_dest_ba_m", 0.0),
+                            "osm_nodes_count": data.get("osm_nodes_count_ba"),
+                            "is_strictly_road": True,
+                            "title": f"{data.get('node_b_name', v)} → {data.get('node_a_name', u)}"
+                        }
+                    })
 
             # Пунктирные коннекторы подъезда к дорожной сети (Access Legs / First-Last Mile)
             conn_origin = data.get("conn_origin_ab_wkt")
