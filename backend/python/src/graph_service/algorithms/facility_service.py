@@ -15,7 +15,7 @@ from graph_service.domain.models import (
 )
 from graph_service.domain.errors import FacilityValidationError
 import geopandas as gpd
-from graph_service.adapters.osm_client import execute_with_overpass_fallback
+from graph_service.http.osm_client import execute_with_overpass_fallback
 
 
 class FacilityService:

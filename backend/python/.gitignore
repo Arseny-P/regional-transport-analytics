@@ -7,9 +7,10 @@ PM-research/
 
 CONTEXT.md
 PYTHON_GRAPH_SERVICE_STRUCTURE.md
-sprint2.md
+sprint*.md
 openapi.yaml
 arch.md
+pr*.md
 kafka-go-python-contract.md
 .vscode/
 
