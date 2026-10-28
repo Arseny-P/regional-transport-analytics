@@ -1,4 +1,4 @@
-import { Layout } from '@/widgets/layout';
+import { AppSidebar } from '@/widgets/app-layout';
 import styles from './StartPage.module.css';
 import { MapView } from '@/widgets/map-view';
 import { useNavigate } from 'react-router-dom';
@@ -35,8 +35,9 @@ export function StartPage() {
   );
 
   return (
-    <Layout sidebarContent={sidebarContent}>
+    <>
+      <AppSidebar>{sidebarContent}</AppSidebar>
       <MapView />
-    </Layout>
+    </>
   );
 }
