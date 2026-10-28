@@ -105,6 +105,56 @@ class TestSmartSnapping(unittest.TestCase):
         # При этом узел 1 может присутствовать в access_nodes как физически близкая точка
         self.assertIn(snapped[0].nearest_osm_node, [2, 3])
 
+    def test_perpendicular_edge_splitting(self):
+        """
+        Проверяет, что объект напротив улицы врезается в ребро с созданием
+        виртуального узла прямо на улице, а не тянется к перекрёстку в конце квартала.
+        """
+        G = nx.MultiDiGraph()
+        G.graph["crs"] = "epsg:4326"
+
+        # Длинная улица между двумя перекрёстками 1 и 2 (~1200м)
+        G.add_node(1, x=30.000, y=59.000)
+        G.add_node(2, x=30.020, y=59.000)
+        G.add_edge(1, 2, key=0, length=1200, highway="residential")
+        G.add_edge(2, 1, key=0, length=1200, highway="residential")
+
+        # Добавим дополнительное кольцо для связности (более длинное, 1400м)
+        G.add_node(3, x=30.010, y=59.005)
+        G.add_edge(1, 3, key=0, length=700)
+        G.add_edge(3, 2, key=0, length=700)
+
+        # Объект стоит посередине квартала на удалении ~110 метров от улицы: (30.010, 59.001)
+        # До перекрестков 1 и 2 расстояние около 600 метров.
+        facility = LogisticsNode(
+            id="fac_mid_street",
+            name="Склад посреди улицы",
+            object_type="warehouse",
+            latitude=59.001,
+            longitude=30.010,
+            region_ids=["ru-spb"],
+            source_osm_ids=[],
+            verification_status=VerificationStatus.VERIFIED.value
+        )
+
+        snapped = self.facility_service.snap_to_road_network(G, [facility], filter_disconnected=False)
+        self.assertEqual(len(snapped), 1)
+
+        # Основным узлом должен стать виртуальный узел прямо на полотне дороги
+        virt_node = snapped[0].nearest_osm_node
+        self.assertGreaterEqual(virt_node, 9_000_000_000)
+        self.assertTrue(G.nodes[virt_node].get("is_virtual"))
+        self.assertAlmostEqual(snapped[0].osm_node_lat, 59.000, places=3)
+        self.assertAlmostEqual(snapped[0].osm_node_lon, 30.010, places=3)
+        # Плечо привязки перпендикулярно и составляет ~111 м, а не 600 м до угла
+        self.assertLess(snapped[0].snap_distance_m, 200)
+
+        # Проверяем, что виртуальный узел полноценно встроен в топологию графа
+        path = nx.shortest_path(G, 1, virt_node, weight="length")
+        self.assertEqual(path, [1, virt_node])
+        path_through = nx.shortest_path(G, 1, 2, weight="length")
+        self.assertIn(virt_node, path_through)
+
 
 if __name__ == "__main__":
     unittest.main()
