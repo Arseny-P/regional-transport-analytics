@@ -50,3 +50,20 @@
   min-height: 0;
   position: relative;
 }
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 24px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  background-color: #ffffff;
+  color: #5c6f7b;
+  font-family: Arial, sans-serif;
+  font-size: 12px;
+}
+
+.footer a {
+  color: #147d78;
+  text-decoration: underline;
+}
