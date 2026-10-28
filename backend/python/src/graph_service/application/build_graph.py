@@ -4,21 +4,23 @@ import json
 from typing import Dict, Any, List, Optional
 import networkx as nx
 
-from models import (
+from graph_service.domain.models import (
     AnalysisRequest,
     AnalysisResponse,
     AnalysisStatus,
     TerritorySourceType,
     FacilitySourceType,
     TerritoryBounds,
-    TerritoryValidationError,
-    FacilityValidationError,
     LogisticsNode,
     RouteStatus,
 )
-from services.road_network_service import RoadNetworkService
-from services.facility_service import FacilityService
-from services.logistics_graph_service import LogisticsGraphService
+from graph_service.domain.errors import (
+    TerritoryValidationError,
+    FacilityValidationError,
+)
+from graph_service.algorithms.road_network_service import RoadNetworkService
+from graph_service.algorithms.facility_service import FacilityService
+from graph_service.algorithms.logistics_graph_service import LogisticsGraphService
 
 
 class TerritoryAnalysisService:
@@ -171,7 +173,11 @@ class TerritoryAnalysisService:
         # 4. Привязка объектов к дорожной сети (Snapping)
         # -----------------------------------------------------------------
         try:
-            snapped_nodes = facility_service.snap_to_road_network(road_graph=road_graph, nodes=all_nodes)
+            snapped_nodes = facility_service.snap_to_road_network(
+                road_graph=road_graph, 
+                nodes=all_nodes,
+                max_snap_distance_m=request.max_snap_distance_m,
+            )
         except Exception as snap_err:
             return AnalysisResponse(
                 status=AnalysisStatus.ERROR.value,
@@ -294,3 +300,7 @@ class TerritoryAnalysisService:
             geojson=geojson_payload,
             warnings=warnings,
         )
+
+
+BuildGraphUseCase = TerritoryAnalysisService
+

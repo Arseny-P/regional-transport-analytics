@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Any
 from enum import Enum
 
+from .errors import TerritoryValidationError, FacilityValidationError
+
 
 class TransportMode(str, Enum):
     ROAD = "road"
@@ -25,16 +27,6 @@ class GraphRole(str, Enum):
     NODE_CANDIDATE = "node_candidate"
     NESTED_CANDIDATE = "nested_candidate"
     NOT_SELECTED = "not_selected"
-
-
-class TerritoryValidationError(ValueError):
-    """Ошибка валидации географических координат или границ исследуемой территории."""
-    pass
-
-
-class FacilityValidationError(ValueError):
-    """Ошибка валидации данных логистического объекта."""
-    pass
 
 
 @dataclass
@@ -129,7 +121,9 @@ class LogisticsNode:
     osm_node_lat: Optional[float] = None
     osm_node_lon: Optional[float] = None
     snap_distance_m: Optional[float] = None
-    access_nodes: List[int] = field(default_factory=list)  # Пул кандидатов точек подключения (въезды/выезды)
+    access_nodes: List[int] = field(default_factory=list)
+    is_isolated: bool = False
+    isolation_reason: Optional[str] = None
 
     def __getitem__(self, key: str) -> Any:
         if key == "lat":
@@ -167,6 +161,8 @@ class LogisticsNode:
             "osm_node_lon": self.osm_node_lon,
             "snap_distance_m": self.snap_distance_m,
             "access_nodes": self.access_nodes,
+            "is_isolated": self.is_isolated,
+            "isolation_reason": self.isolation_reason,
         }
 
 
@@ -193,6 +189,7 @@ class LogisticsEdge:
     osm_nodes_count_ab: int = 0
     path_osm_nodes_ab: List[int] = field(default_factory=list)
     geometry_ab_wkt: Optional[str] = None
+    road_geometry_ab_wkt: Optional[str] = None
     
     # Направление B -> A
     distance_ba_m: Optional[float] = None
@@ -204,6 +201,7 @@ class LogisticsEdge:
     osm_nodes_count_ba: int = 0
     path_osm_nodes_ba: List[int] = field(default_factory=list)
     geometry_ba_wkt: Optional[str] = None
+    road_geometry_ba_wkt: Optional[str] = None
     
     connection_status: str = "candidate"
 
@@ -222,6 +220,7 @@ class LogisticsEdge:
             "route_status_ab": self.route_status_ab,
             "osm_nodes_count_ab": self.osm_nodes_count_ab,
             "geometry_ab_wkt": self.geometry_ab_wkt,
+            "road_geometry_ab_wkt": self.road_geometry_ab_wkt,
             "distance_ba_m": self.distance_ba_m,
             "total_distance_ba_m": self.total_distance_ba_m,
             "snap_origin_ba_m": self.snap_origin_ba_m,
@@ -230,6 +229,7 @@ class LogisticsEdge:
             "route_status_ba": self.route_status_ba,
             "osm_nodes_count_ba": self.osm_nodes_count_ba,
             "geometry_ba_wkt": self.geometry_ba_wkt,
+            "road_geometry_ba_wkt": self.road_geometry_ba_wkt,
             "connection_status": self.connection_status,
         }
 
@@ -266,6 +266,7 @@ class AnalysisRequest:
     facilities: List[Dict[str, Any]] = field(default_factory=list)
     osm_facilities_limit: int = 100
     osm_tags: Optional[Dict[str, Any]] = None
+    max_snap_distance_m: Optional[float] = None
 
     knn: Optional[int] = None
     output_dir: str = "data"
@@ -286,7 +287,6 @@ class AnalysisRequest:
                 max_lon=float(bbox_data["max_lon"]),
             )
         elif isinstance(bbox_data, (list, tuple)) and len(bbox_data) == 4:
-            # Поддержка формата [min_lat, min_lon, max_lat, max_lon]
             bbox_obj = TerritoryBounds(
                 min_lat=float(bbox_data[0]),
                 min_lon=float(bbox_data[1]),
@@ -301,8 +301,9 @@ class AnalysisRequest:
             which_result=data.get("which_result"),
             facility_source=str(data.get("facility_source", FacilitySourceType.USER_DEFINED.value)),
             facilities=data.get("facilities", []),
-            osm_facilities_limit=int(data.get("osm_facilities_limit", 15)),
+            osm_facilities_limit=int(data.get("osm_facilities_limit", 100)),
             osm_tags=data.get("osm_tags"),
+            max_snap_distance_m=float(data["max_snap_distance_m"]) if data.get("max_snap_distance_m") is not None else None,
             knn=int(data["knn"]) if data.get("knn") is not None else None,
             output_dir=str(data.get("output_dir", "data")),
             output_alias=data.get("output_alias"),
@@ -339,5 +340,3 @@ class AnalysisResponse:
             "warnings": self.warnings,
             "error_message": self.error_message,
         }
-
-

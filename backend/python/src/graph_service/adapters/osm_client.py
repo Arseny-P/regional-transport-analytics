@@ -2,13 +2,11 @@ import time
 from typing import Callable, Any, List
 import osmnx as ox
 
+from graph_service.config import config
+from graph_service.domain.errors import OSMUnavailableError
+
 # Список проверенных публичных глобальных зеркал Overpass API в порядке приоритета
-OVERPASS_MIRRORS: List[str] = [
-    "https://overpass-api.de/api",
-    "https://overpass.kumi.systems/api",
-    "https://overpass.private.coffee/api",
-    "https://maps.mail.ru/osm/tools/overpass/api",
-]
+OVERPASS_MIRRORS: List[str] = config.overpass.mirrors
 
 
 def execute_with_overpass_fallback(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
@@ -19,11 +17,13 @@ def execute_with_overpass_fallback(func: Callable[..., Any], *args: Any, **kwarg
     """
     last_error = None
     attempted_errors: List[str] = []
+    mirrors = config.overpass.mirrors
 
-    for idx, mirror in enumerate(OVERPASS_MIRRORS, start=1):
+    for idx, mirror in enumerate(mirrors, start=1):
         ox.settings.overpass_url = mirror
+        ox.settings.requests_timeout = config.overpass.requests_timeout_sec
         try:
-            print(f"[*] Попытка [{idx}/{len(OVERPASS_MIRRORS)}] через Overpass зеркало: {mirror}...")
+            print(f"[*] Попытка [{idx}/{len(mirrors)}] через Overpass зеркало: {mirror}...")
             result = func(*args, **kwargs)
             return result
         except Exception as err:
@@ -31,10 +31,10 @@ def execute_with_overpass_fallback(func: Callable[..., Any], *args: Any, **kwarg
             err_repr = f"{type(err).__name__}: {str(err)[:100]}"
             print(f"[-] Зеркало {mirror} недоступно или отклонило запрос ({err_repr}).")
             attempted_errors.append(f"{mirror} -> {err_repr}")
-            if idx < len(OVERPASS_MIRRORS):
+            if idx < len(mirrors):
                 time.sleep(1.0)
 
-    raise RuntimeError(
+    raise OSMUnavailableError(
         f"Все доступные зеркала Overpass API завершились ошибкой:\n"
         + "\n".join(f"  • {e}" for e in attempted_errors)
     ) from last_error

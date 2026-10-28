@@ -3,8 +3,8 @@ import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Polygon, Point
 
-from models import GraphRole, VerificationStatus, LogisticsNode
-from services import FacilityService
+from graph_service.domain import GraphRole, VerificationStatus, LogisticsNode
+from graph_service.algorithms import FacilityService
 
 
 class TestFacilityClassification(unittest.TestCase):

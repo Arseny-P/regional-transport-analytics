@@ -4,9 +4,18 @@ from typing import List, Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
 import pandas as pd
-from models import LogisticsNode, VerificationStatus, GraphRole, TransportMode, TerritoryBounds, FacilityValidationError
+from shapely.geometry import Point, LineString
+from shapely.ops import substring
+from graph_service.domain.models import (
+    LogisticsNode,
+    VerificationStatus,
+    GraphRole,
+    TransportMode,
+    TerritoryBounds,
+)
+from graph_service.domain.errors import FacilityValidationError
 import geopandas as gpd
-from services.overpass_client import execute_with_overpass_fallback
+from graph_service.adapters.osm_client import execute_with_overpass_fallback
 
 
 class FacilityService:
@@ -417,11 +426,102 @@ class FacilityService:
 
         return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
 
+    def _split_edge_for_virtual_node(
+        self,
+        road_graph: nx.MultiDiGraph,
+        u: int,
+        v: int,
+        key: int,
+        proj_pt: Point,
+        cut_dist: float,
+        virtual_node_id: int,
+    ) -> bool:
+        """
+        Врезает виртуальную вершину virtual_node_id прямо в дорожный сегмент (u, v)
+        в точке перпендикулярной проекции объекта proj_pt, разбивая ребро и сохраняя
+        непрерывность и направленность движения.
+        """
+        if not road_graph.has_edge(u, v, key):
+            return False
+
+        fwd_data = dict(road_graph[u][v][key])
+        orig_len = float(fwd_data.get("length", 100.0))
+        geom = fwd_data.get("geometry")
+        if geom is None or not isinstance(geom, LineString):
+            geom = LineString([
+                (road_graph.nodes[u]["x"], road_graph.nodes[u]["y"]),
+                (road_graph.nodes[v]["x"], road_graph.nodes[v]["y"])
+            ])
+
+        total_geom_len = max(geom.length, 1e-9)
+        ratio = max(0.01, min(0.99, cut_dist / total_geom_len))
+        len_1 = max(1.0, round(orig_len * ratio, 1))
+        len_2 = max(1.0, round(orig_len - len_1, 1))
+
+        sub_geom1 = substring(geom, 0, cut_dist)
+        sub_geom2 = substring(geom, cut_dist, geom.length)
+
+        # 1. Добавляем виртуальную вершину прямо на полотно дороги
+        road_graph.add_node(
+            virtual_node_id,
+            x=float(proj_pt.x),
+            y=float(proj_pt.y),
+            osmid=virtual_node_id,
+            is_virtual=True,
+        )
+
+        # 2. Прямые ребра (u -> virt) и (virt -> v)
+        data_u_virt = dict(fwd_data)
+        data_u_virt["length"] = len_1
+        data_u_virt["geometry"] = sub_geom1
+        road_graph.add_edge(u, virtual_node_id, key=0, **data_u_virt)
+
+        data_virt_v = dict(fwd_data)
+        data_virt_v["length"] = len_2
+        data_virt_v["geometry"] = sub_geom2
+        road_graph.add_edge(virtual_node_id, v, key=0, **data_virt_v)
+
+        road_graph.remove_edge(u, v, key=key)
+
+        # 3. Обратные ребра (если улица двусторонняя, v -> u)
+        if road_graph.has_edge(v, u):
+            for rev_k in list(road_graph[v][u].keys()):
+                rev_data = dict(road_graph[v][u][rev_k])
+                rev_geom = rev_data.get("geometry")
+                if rev_geom is not None and isinstance(rev_geom, LineString):
+                    rev_cut = rev_geom.project(proj_pt)
+                    rev_sub1 = substring(rev_geom, 0, rev_cut)
+                    rev_sub2 = substring(rev_geom, rev_cut, rev_geom.length)
+                else:
+                    rev_sub1 = LineString([
+                        (road_graph.nodes[v]["x"], road_graph.nodes[v]["y"]),
+                        (proj_pt.x, proj_pt.y)
+                    ])
+                    rev_sub2 = LineString([
+                        (proj_pt.x, proj_pt.y),
+                        (road_graph.nodes[u]["x"], road_graph.nodes[u]["y"])
+                    ])
+
+                data_v_virt = dict(rev_data)
+                data_v_virt["length"] = len_2
+                data_v_virt["geometry"] = rev_sub1
+                road_graph.add_edge(v, virtual_node_id, key=rev_k, **data_v_virt)
+
+                data_virt_u = dict(rev_data)
+                data_virt_u["length"] = len_1
+                data_virt_u["geometry"] = rev_sub2
+                road_graph.add_edge(virtual_node_id, u, key=rev_k, **data_virt_u)
+
+                road_graph.remove_edge(v, u, key=rev_k)
+
+        return True
+
     def snap_to_road_network(
         self, 
         road_graph: nx.MultiDiGraph, 
         nodes: List[Any],
-        filter_disconnected: bool = True
+        filter_disconnected: bool = True,
+        max_snap_distance_m: Optional[float] = None,
     ) -> List[LogisticsNode]:
         """
         Умная пространственная привязка (Smart Snapping) объектов к дорожной сети OSM:
@@ -491,10 +591,17 @@ class FacilityService:
         if len(active_graph.edges) > 0:
             try:
                 edge_res = ox.nearest_edges(active_graph, X=lons, Y=lats)
-                if len(log_nodes) == 1 and not isinstance(edge_res, (list, tuple)):
-                    nearest_edge_tuples = [edge_res]
+                if hasattr(edge_res, "tolist"):
+                    edge_list = edge_res.tolist()
+                elif isinstance(edge_res, (list, tuple)):
+                    edge_list = list(edge_res)
                 else:
-                    nearest_edge_tuples = list(edge_res)
+                    edge_list = [edge_res]
+
+                if len(log_nodes) == 1 and len(edge_list) > 0 and not isinstance(edge_list[0], (list, tuple)):
+                    nearest_edge_tuples = [tuple(edge_list)]
+                else:
+                    nearest_edge_tuples = [tuple(e) if isinstance(e, (list, tuple)) else e for e in edge_list]
             except Exception:
                 nearest_edge_tuples = [None] * len(log_nodes)
         else:
@@ -504,94 +611,161 @@ class FacilityService:
 
         for idx, (node, primary_id) in enumerate(zip(log_nodes, primary_node_ids)):
             primary_id_native = int(primary_id)
-            candidate_pool = {primary_id_native}
+            split_succeeded = False
+            best_node_id = primary_id_native
+            best_lat = float(road_graph.nodes[primary_id_native]["y"])
+            best_lon = float(road_graph.nodes[primary_id_native]["x"])
+            best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
+            access_pool: List[int] = [primary_id_native]
 
-            # Добавляем концы ближайшего дорожного сегмента (u, v)
+            # 1. Попытка перпендикулярной врезки к ближайшему дорожному сегменту (Edge Splitting)
             if idx < len(nearest_edge_tuples) and nearest_edge_tuples[idx] is not None:
                 e_data = nearest_edge_tuples[idx]
                 if isinstance(e_data, tuple) and len(e_data) >= 2:
                     u_cand, v_cand = int(e_data[0]), int(e_data[1])
-                    if u_cand in road_graph:
-                        candidate_pool.add(u_cand)
-                    if v_cand in road_graph:
-                        candidate_pool.add(v_cand)
+                    e_key = int(e_data[2]) if len(e_data) > 2 else 0
 
-            # Добавляем топологических соседей (successors и predecessors)
-            nodes_to_expand = list(candidate_pool)
-            for cid in nodes_to_expand:
-                if cid in road_graph:
-                    for neighbor in road_graph.successors(cid):
-                        candidate_pool.add(int(neighbor))
-                    for predecessor in road_graph.predecessors(cid):
-                        candidate_pool.add(int(predecessor))
+                    if road_graph.has_edge(u_cand, v_cand, e_key):
+                        e_attrs = road_graph[u_cand][v_cand][e_key]
+                        geom = e_attrs.get("geometry")
+                        if geom is None or not isinstance(geom, LineString):
+                            geom = LineString([
+                                (road_graph.nodes[u_cand]["x"], road_graph.nodes[u_cand]["y"]),
+                                (road_graph.nodes[v_cand]["x"], road_graph.nodes[v_cand]["y"])
+                            ])
 
-            # Считаем точные геодезические расстояния и проверяем directed-степени
-            candidate_details = []
-            for cand_id in candidate_pool:
-                if cand_id in road_graph.nodes:
-                    cand_data = road_graph.nodes[cand_id]
-                    c_lat = float(cand_data.get("y"))
-                    c_lon = float(cand_data.get("x"))
-                    d = ox.distance.great_circle(node.latitude, node.longitude, c_lat, c_lon)
+                        fac_pt = Point(node.longitude, node.latitude)
+                        cut_dist = geom.project(fac_pt)
+                        proj_pt = geom.interpolate(cut_dist)
+                        proj_lon, proj_lat = float(proj_pt.x), float(proj_pt.y)
 
-                    in_deg = road_graph.in_degree(cand_id)
-                    out_deg = road_graph.out_degree(cand_id)
+                        proj_dist_m = ox.distance.great_circle(node.latitude, node.longitude, proj_lat, proj_lon)
+                        dist_to_u = ox.distance.great_circle(proj_lat, proj_lon, road_graph.nodes[u_cand]["y"], road_graph.nodes[u_cand]["x"])
+                        dist_to_v = ox.distance.great_circle(proj_lat, proj_lon, road_graph.nodes[v_cand]["y"], road_graph.nodes[v_cand]["x"])
 
-                    # Штраф за тупик/одностороннее ограничение при выборе основного узла:
-                    # Если узел сквозной (in > 0 и out > 0), штраф 0.
-                    # Если тупик (въезд есть, а выезда нет, или наоборот), штраф 100 метров,
-                    # чтобы при наличии сквозного перекрестка рядом предпочесть его.
-                    is_transit = (in_deg > 0 and out_deg > 0)
-                    penalty = 0.0 if is_transit else 100.0
-                    score = d + penalty
+                        # Проверяем, что улица сквозная (не ведет в односторонний тупик без выезда)
+                        is_bidirectional = road_graph.has_edge(v_cand, u_cand)
+                        has_exit = is_bidirectional or (road_graph.out_degree(v_cand) > 0)
 
-                    candidate_details.append({
-                        "id": cand_id,
-                        "dist": d,
-                        "score": score,
-                        "lat": c_lat,
-                        "lon": c_lon,
-                        "in_deg": in_deg,
-                        "out_deg": out_deg,
-                        "is_transit": is_transit,
-                    })
+                        if has_exit:
+                            if dist_to_u < 8.0:
+                                # Проекция находится в пределах 8 метров от перекрёстка u
+                                best_node_id = u_cand
+                                best_lat = float(road_graph.nodes[u_cand]["y"])
+                                best_lon = float(road_graph.nodes[u_cand]["x"])
+                                best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
+                                access_pool = [u_cand, v_cand]
+                                split_succeeded = True
+                            elif dist_to_v < 8.0:
+                                # Проекция находится в пределах 8 метров от перекрёстка v
+                                best_node_id = v_cand
+                                best_lat = float(road_graph.nodes[v_cand]["y"])
+                                best_lon = float(road_graph.nodes[v_cand]["x"])
+                                best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
+                                access_pool = [v_cand, u_cand]
+                                split_succeeded = True
+                            else:
+                                virtual_id = 9_000_000_000 + (idx + 1)
+                                if self._split_edge_for_virtual_node(road_graph, u_cand, v_cand, e_key, proj_pt, cut_dist, virtual_id):
+                                    best_node_id = virtual_id
+                                    best_lat = proj_lat
+                                    best_lon = proj_lon
+                                    best_dist = proj_dist_m
+                                    access_pool = [virtual_id, u_cand, v_cand]
+                                    split_succeeded = True
 
-            # Сортируем кандидатов по качеству (score) для выбора основного узла
-            candidate_details.sort(key=lambda x: (x["score"], x["dist"]))
+            # 2. Если врезка не удалась — резервный выбор из перекрёстков-кандидатов с защитой от тупиков
+            if not split_succeeded:
+                candidate_pool = {primary_id_native}
+                if idx < len(nearest_edge_tuples) and nearest_edge_tuples[idx] is not None:
+                    e_data = nearest_edge_tuples[idx]
+                    if isinstance(e_data, tuple) and len(e_data) >= 2:
+                        u_cand, v_cand = int(e_data[0]), int(e_data[1])
+                        if u_cand in road_graph:
+                            candidate_pool.add(u_cand)
+                        if v_cand in road_graph:
+                            candidate_pool.add(v_cand)
 
-            best_cand = candidate_details[0]
-            best_node_id = best_cand["id"]
-            best_dist = best_cand["dist"]
-            best_lat = best_cand["lat"]
-            best_lon = best_cand["lon"]
+                nodes_to_expand = list(candidate_pool)
+                for cid in nodes_to_expand:
+                    if cid in road_graph:
+                        for neighbor in road_graph.successors(cid):
+                            candidate_pool.add(int(neighbor))
+                        for predecessor in road_graph.predecessors(cid):
+                            candidate_pool.add(int(predecessor))
+
+                candidate_details = []
+                for cand_id in candidate_pool:
+                    if cand_id in road_graph.nodes:
+                        cand_data = road_graph.nodes[cand_id]
+                        c_lat = float(cand_data.get("y"))
+                        c_lon = float(cand_data.get("x"))
+                        d = ox.distance.great_circle(node.latitude, node.longitude, c_lat, c_lon)
+
+                        in_deg = road_graph.in_degree(cand_id)
+                        out_deg = road_graph.out_degree(cand_id)
+
+                        is_transit = (in_deg > 0 and out_deg > 0)
+                        penalty = 0.0 if is_transit else 100.0
+                        score = d + penalty
+
+                        candidate_details.append({
+                            "id": cand_id,
+                            "dist": d,
+                            "score": score,
+                            "lat": c_lat,
+                            "lon": c_lon,
+                            "in_deg": in_deg,
+                            "out_deg": out_deg,
+                            "is_transit": is_transit,
+                        })
+
+                candidate_details.sort(key=lambda x: (x["score"], x["dist"]))
+
+                best_cand = candidate_details[0]
+                best_node_id = best_cand["id"]
+                best_dist = best_cand["dist"]
+                best_lat = best_cand["lat"]
+                best_lon = best_cand["lon"]
+
+                access_pool = [best_node_id]
+                remaining = sorted(
+                    [c for c in candidate_details if c["id"] != best_node_id],
+                    key=lambda x: (not x["is_transit"], x["dist"])
+                )
+                for c in remaining:
+                    if len(access_pool) >= 5:
+                        break
+                    access_pool.append(c["id"])
+
+            if max_snap_distance_m is not None and best_dist > max_snap_distance_m:
+                node.nearest_osm_node = None
+                node.osm_node_lat = None
+                node.osm_node_lon = None
+                node.snap_distance_m = round(float(best_dist), 1)
+                node.access_nodes = []
+                node.is_isolated = True
+                node.isolation_reason = (
+                    f"Превышен лимит расстояния до автодороги: {round(float(best_dist), 1)} м > {max_snap_distance_m:.1f} м "
+                    f"(объект в акватории или нет подъездных путей)"
+                )
+                snapped_nodes.append(node)
+                print(f"  [SmartSnap] '{node.name}' -> [!] ИЗОЛИРОВАН: расстояние до дорожной сети {node.snap_distance_m} м > {max_snap_distance_m:.1f} м (морская акватория / нет автодорог)")
+                continue
 
             node.nearest_osm_node = best_node_id
             node.osm_node_lat = best_lat
             node.osm_node_lon = best_lon
             node.snap_distance_m = round(float(best_dist), 1)
-
-            # Формируем пул access_nodes:
-            # Отбираем до 5 лучших узлов, при этом приоритизируя сквозные и распределяя
-            # кандидатов так, чтобы были как точки выезда (out > 0), так и точки въезда (in > 0).
-            access_pool: List[int] = []
-            access_pool.append(best_node_id)
-
-            remaining = sorted(
-                [c for c in candidate_details if c["id"] != best_node_id],
-                key=lambda x: (not x["is_transit"], x["dist"])
-            )
-            for c in remaining:
-                if len(access_pool) >= 5:
-                    break
-                access_pool.append(c["id"])
-
             node.access_nodes = access_pool
+            node.is_isolated = False
+            node.isolation_reason = None
             snapped_nodes.append(node)
 
-            warning_tag = " [!] ДАЛЕКО" if best_dist > 1000 else ""
-            transit_tag = " (сквозной)" if best_cand["is_transit"] else " (тупик/односторонний)"
+            warning_tag = " [!] ДАЛЕКО" if best_dist > 300 else ""
+            tag = " (виртуальный узел на ребре)" if best_node_id >= 9_000_000_000 else " (перекресток)"
             print(f"  [SmartSnap] '{node.name}' -> {len(node.access_nodes)} точек подключения "
-                  f"(осн. узел {best_node_id}{transit_tag}, плечо: {node.snap_distance_m} м){warning_tag}")
+                  f"(осн. узел {best_node_id}{tag}, плечо: {node.snap_distance_m} м){warning_tag}")
 
         return snapped_nodes
 

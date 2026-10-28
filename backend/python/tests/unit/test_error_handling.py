@@ -1,6 +1,6 @@
 import os
 import unittest
-from models import (
+from graph_service.domain import (
     AnalysisRequest,
     AnalysisResponse,
     AnalysisStatus,
@@ -8,12 +8,18 @@ from models import (
     FacilitySourceType,
     TerritoryBounds,
 )
-from services import TerritoryAnalysisService
+from graph_service.application import TerritoryAnalysisService
 
 
 class TestErrorHandling(unittest.TestCase):
     def setUp(self):
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        curr = os.path.dirname(os.path.abspath(__file__))
+        while curr and not os.path.exists(os.path.join(curr, "data")):
+            parent = os.path.dirname(curr)
+            if parent == curr:
+                break
+            curr = parent
+        data_dir = os.path.join(curr, "data")
         self.service = TerritoryAnalysisService(default_storage_dir=data_dir)
 
     def test_missing_bbox_for_bbox_mode(self):
@@ -61,7 +67,7 @@ class TestErrorHandling(unittest.TestCase):
         self.assertIn("не содержит обязательных координат", res.error_message)
 
     def test_overpass_fallback_succeeds_on_second_mirror(self):
-        from services.overpass_client import execute_with_overpass_fallback
+        from graph_service.adapters import execute_with_overpass_fallback
         from unittest.mock import MagicMock, patch
 
         mock_func = MagicMock()
@@ -73,7 +79,7 @@ class TestErrorHandling(unittest.TestCase):
         self.assertEqual(mock_func.call_count, 2)
 
     def test_overpass_fallback_fails_when_all_mirrors_fail(self):
-        from services.overpass_client import execute_with_overpass_fallback, OVERPASS_MIRRORS
+        from graph_service.adapters import execute_with_overpass_fallback, OVERPASS_MIRRORS
         from unittest.mock import MagicMock, patch
 
         mock_func = MagicMock(side_effect=TimeoutError("Request timed out"))

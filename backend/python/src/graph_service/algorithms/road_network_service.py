@@ -2,11 +2,10 @@ import os
 from typing import Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
-import geopandas as gpd
-from models import TerritoryBounds, TerritoryValidationError
-from services.overpass_client import execute_with_overpass_fallback
 
-# Настройки OSMnx по умолчанию
+from graph_service.domain.models import TerritoryBounds
+from graph_service.adapters.osm_client import execute_with_overpass_fallback
+
 ox.settings.log_console = False
 ox.settings.use_cache = True
 ox.settings.requests_timeout = 60

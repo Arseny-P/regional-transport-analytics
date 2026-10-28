@@ -3,7 +3,7 @@ import json
 import unittest
 import networkx as nx
 
-from models import (
+from graph_service.domain import (
     AnalysisRequest,
     AnalysisResponse,
     AnalysisStatus,
@@ -11,12 +11,19 @@ from models import (
     FacilitySourceType,
     TerritoryBounds,
 )
-from services import TerritoryAnalysisService, LogisticsGraphService
+from graph_service.application import TerritoryAnalysisService
+from graph_service.algorithms import LogisticsGraphService
 
 
 class TestPipelineOffline(unittest.TestCase):
     def setUp(self):
-        self.data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        curr = os.path.dirname(os.path.abspath(__file__))
+        while curr and not os.path.exists(os.path.join(curr, "data")):
+            parent = os.path.dirname(curr)
+            if parent == curr:
+                break
+            curr = parent
+        self.data_dir = os.path.join(curr, "data")
         self.service = TerritoryAnalysisService(default_storage_dir=self.data_dir)
         self.logistics_service = LogisticsGraphService(storage_dir=self.data_dir)
 
@@ -77,6 +84,13 @@ class TestPipelineOffline(unittest.TestCase):
         self.assertIn("logistics_hub", feature_types)
         self.assertIn("transport_route", feature_types)
         self.assertIn("access_connector", feature_types)
+
+        # Проверка, что маршруты идут строго по дорожному полотну
+        routes = [f for f in geojson["features"] if f["properties"].get("feature_type") == "transport_route"]
+        self.assertGreater(len(routes), 0)
+        for r in routes:
+            self.assertTrue(r["properties"].get("is_strictly_road"))
+            self.assertGreater(r["properties"].get("road_distance_m", 0), 0)
 
         # 6. Проверка оффлайн-восстановления из GraphML
         restored_graph = self.logistics_service.load_graphml(filename=f"{alias}_logistics")
