@@ -13,7 +13,7 @@
 
 .description {
   margin: 0;
-  color: #5C6F7B;
+  color: #5c6f7b;
   line-height: 1.5;
   font-family: Arial, sans-serif;
 }
@@ -25,9 +25,9 @@
   gap: 20px;
 
   padding: 32px 20px;
-  border: 1px double #D8E1E6;
+  border: 1px double #d8e1e6;
   border-radius: 0px;
-  background-color: #F3F6F8;
+  background-color: #f3f6f8;
   color: #243746;
   text-align: center;
   font-family: Arial, sans-serif;
@@ -41,6 +41,6 @@
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
-  color: #5C6F7B;
+  color: #5c6f7b;
   font-family: Arial, sans-serif;
 }

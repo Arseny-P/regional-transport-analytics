@@ -4,7 +4,7 @@ import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
-import { Button } from '@/shared/ui/button';
+import { Button } from '@/shared/ui';
 import type { BBox } from '@/entities/area';
 import {
   DEFAULT_TRANSPORT_MODES,
@@ -32,8 +32,6 @@ export function AnalysisPage() {
   const [latitude1 = '', longitude1 = ''] = point1.split(',');
   const [latitude2 = '', longitude2 = ''] = point2.split(',');
 
-  const navigateToResult = () => navigate('/result');
-
   const sidebarContent = (
     <>
       <h3 className={styles.title}>Ввод координат</h3>
@@ -46,9 +44,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="59.88"
             value={latitude1}
-            onChange={(e) =>
-              setPoint1(`${e.target.value},${longitude1}`)
-            }
+            onChange={(e) => setPoint1(`${e.target.value},${longitude1}`)}
             className={styles.input}
           />
         </label>
@@ -59,9 +55,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="29.82"
             value={longitude1}
-            onChange={(e) =>
-              setPoint1(`${latitude1},${e.target.value}`)
-            }
+            onChange={(e) => setPoint1(`${latitude1},${e.target.value}`)}
             className={styles.input}
           />
         </label>
@@ -76,9 +70,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="59.89"
             value={latitude2}
-            onChange={(e) =>
-              setPoint2(`${e.target.value},${longitude2}`)
-            }
+            onChange={(e) => setPoint2(`${e.target.value},${longitude2}`)}
             className={styles.input}
           />
         </label>
@@ -89,9 +81,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="29.83"
             value={longitude2}
-            onChange={(e) =>
-              setPoint2(`${latitude2},${e.target.value}`)
-            }
+            onChange={(e) => setPoint2(`${latitude2},${e.target.value}`)}
             className={styles.input}
           />
         </label>
@@ -113,7 +103,6 @@ export function AnalysisPage() {
     </>
   );
 
-  
   const hint = !selectedArea
     ? 'Выделите участок карты двумя кликами'
     : !transports.length
@@ -136,20 +125,13 @@ export function AnalysisPage() {
       <div className={styles.actions}>
         <span className={styles.hint}>{hint}</span>
         {error && <span className={styles.error}>{error}</span>}
-        {/* <button
+        <Button
           onClick={() => selectedArea && run(selectedArea, transports)}
           disabled={!selectedArea || !transports.length || isLoading}
-          className={styles.runButton}
         >
           {isLoading ? 'Запуск анализа...' : 'Начать анализ'}
-        </button> */}
-        <Button onClick= {navigateToResult} 
-        className={styles.newAnalysisButton}>
-          Анализ
         </Button>
       </div>
-
-    
     </div>
   );
 }
