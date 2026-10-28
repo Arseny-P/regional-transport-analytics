@@ -3,12 +3,13 @@ from typing import Dict, Any, Optional
 import networkx as nx
 import osmnx as ox
 import geopandas as gpd
+from models import TerritoryBounds, TerritoryValidationError
+from services.overpass_client import execute_with_overpass_fallback
 
 # Настройки OSMnx по умолчанию
 ox.settings.log_console = False
 ox.settings.use_cache = True
-# Надежное зеркало Overpass для защиты от перегрузки основного сервера
-ox.settings.overpass_endpoint = "https://overpass.kumi.systems/api"
+ox.settings.requests_timeout = 60
 
 
 class RoadNetworkService:
@@ -20,6 +21,36 @@ class RoadNetworkService:
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
 
+    def fetch_and_build_from_bbox(
+        self,
+        bbox: TerritoryBounds,
+        network_type: str = "drive",
+        simplify: bool = True,
+    ) -> nx.MultiDiGraph:
+        """
+        Загружает автомобильную дорожную сеть из OSM для заданного BBox (TerritoryBounds)
+        с автоматической ротацией зеркал Overpass API.
+        """
+        bbox.validate()
+        print(f"[*] Загрузка данных дорожной сети OSM по BBox: "
+              f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
+
+        try:
+            graph = execute_with_overpass_fallback(
+                ox.graph_from_bbox,
+                bbox=bbox.to_osmnx_bbox(),
+                network_type=network_type,
+                simplify=simplify,
+            )
+        except Exception as e:
+            raise RuntimeError(f"Ошибка загрузки дорожной сети OSM для указанного BBox: {e}") from e
+
+        if len(graph.nodes) == 0:
+            raise ValueError(f"Дорожная сеть для указанного BBox пуста. Проверьте координаты территории.")
+
+        print(f"[+] Дорожная сеть построена по BBox: {len(graph.nodes)} вершин, {len(graph.edges)} ребер.")
+        return graph
+
     def fetch_and_build(
         self, 
         place_name: str, 
@@ -28,14 +59,19 @@ class RoadNetworkService:
         which_result: Optional[int] = None
     ) -> nx.MultiDiGraph:
         """
-        Загружает дорожную сеть из OSM и строит топологически корректный граф дорог.
+        Загружает дорожную сеть из OSM и строит топологически корректный граф дорог
+        с автоматической ротацией зеркал Overpass API.
         """
         print(f"[*] Загрузка данных дорожной сети OSM для: '{place_name}'...")
         kwargs = {"network_type": network_type, "simplify": simplify}
         if which_result is not None:
             kwargs["which_result"] = which_result
 
-        graph = ox.graph_from_place(place_name, **kwargs)
+        try:
+            graph = execute_with_overpass_fallback(ox.graph_from_place, place_name, **kwargs)
+        except Exception as e:
+            raise RuntimeError(f"Ошибка загрузки дорожной сети OSM для '{place_name}': {e}") from e
+
         print(f"[+] Дорожная сеть построена: {len(graph.nodes)} вершин, {len(graph.edges)} ребер.")
         return graph
 
