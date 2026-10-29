@@ -6,6 +6,7 @@ import { MetricSelect } from '@/features/select-metric';
 import { GraphLayer, isFinalState, useAnalysisJob, type JobState } from '@/entities/analysis';
 import { ApiError } from '@/shared/api';
 import styles from './ResultPage.module.css';
+import { Button } from '@/shared/ui/button';
 
 const STATUS_LABELS: Record<JobState, string> = {
   queued: 'В очереди',
@@ -23,9 +24,9 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
     <>
       <h3 className={styles.title}>Результаты анализа</h3>
       {sidebar}
-      <button onClick={() => navigate('/analysis')} className={styles.newAnalysisButton}>
+      <Button onClick={() => navigate('/analysis')}>
         Новый анализ
-      </button>
+      </Button>
     </>
   );
 

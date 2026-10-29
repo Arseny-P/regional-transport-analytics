@@ -7,29 +7,23 @@
 
 .title {
   margin-top: 0;
+  font-family:Arial, Helvetica, sans-serif;
 }
 
 .error {
   color: #da1e28;
+  font-family:Arial, Helvetica, sans-serif;
 }
 
 .warning {
   color: #b28600;
+  font-family:Arial, Helvetica, sans-serif;
 }
 
 .muted {
   font-size: 14px;
   color: #666;
-}
-
-.newAnalysisButton {
-  width: 100%;
-  margin-top: auto;
-  padding: 10px;
-  border: none;
-  border-radius: 6px;
-  background-color: #e6e6e6;
-  cursor: pointer;
+  font-family:Arial, Helvetica, sans-serif;
 }
 
 .overlay {
