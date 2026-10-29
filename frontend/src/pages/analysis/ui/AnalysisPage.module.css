@@ -26,18 +26,17 @@
   width: 100%;
   margin-top: 2px;
   padding: 6px 4px;
-  border: 1px solid #D8E1E6;
+  border: 1px solid #d8e1e6;
   border-radius: 6px;
   box-sizing: border-box;
   font-family: Arial, sans-serif;
   margin-bottom: 4px;
-  color: #5C6F7B;
+  color: #5c6f7b;
 }
 
 .transports {
   margin-top: 20px;
 }
-
 
 .transport {
   display: block;
@@ -76,7 +75,7 @@
 }
 
 .coordinates h4 {
-  margin-bottom:6px;
+  margin-bottom: 6px;
   font-family: Arial, sans-serif;
   color: #243746;
 }
@@ -88,4 +87,3 @@
   font-family: Arial, sans-serif;
   color: #243746;
 }
-

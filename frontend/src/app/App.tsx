@@ -4,7 +4,7 @@ import { StartPage } from '@/pages/start';
 import { AnalysisPage } from '@/pages/analysis';
 import { ResultPage } from '@/pages/result';
 
-export default function App() {
+export function App() {
   return (
     <Router>
       <Routes>
