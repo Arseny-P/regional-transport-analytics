@@ -32,7 +32,7 @@ export function AnalysisPage() {
   const [latitude1 = '', longitude1 = ''] = point1.split(',');
   const [latitude2 = '', longitude2 = ''] = point2.split(',');
 
-  const navigateToResult = () => navigate('/result');
+  const toStartPage = () => navigate('/start');
 
   const sidebarContent = (
     <>
@@ -110,6 +110,9 @@ export function AnalysisPage() {
           </label>
         ))}
       </div>
+      <Button onClick={toStartPage} style={{ marginBottom: '1rem' }}>
+        К выбору файла
+      </Button>
     </>
   );
 
@@ -136,20 +139,15 @@ export function AnalysisPage() {
       <div className={styles.actions}>
         <span className={styles.hint}>{hint}</span>
         {error && <span className={styles.error}>{error}</span>}
-        {/* <button
+        <Button
           onClick={() => selectedArea && run(selectedArea, transports)}
           disabled={!selectedArea || !transports.length || isLoading}
-          className={styles.runButton}
         >
           {isLoading ? 'Запуск анализа...' : 'Начать анализ'}
-        </button> */}
-        <Button onClick= {navigateToResult} 
-        className={styles.newAnalysisButton}>
-          Анализ
         </Button>
-      </div>
-
-    
+      </div>    
     </div>
   );
+
+
 }

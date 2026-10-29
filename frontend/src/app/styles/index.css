@@ -9,3 +9,46 @@ body,
 .leaflet-control-attribution {
   display: none !important;
 }
+
+/* Общие цвета */
+:root {
+  --general-bg: #ffffff;
+  --second-bg: #f3f6f8;
+  --text-primary: #243746;
+  --text-secondary: #5c6f7b;
+  --accent: #147d78;
+  --active-button: #10635F;
+  --border: #d8e1e6;
+  --error-msg: #7B2F2F;
+}
+
+/* Размеры блоков включают отступы и рамки */
+* {
+  box-sizing: border-box;
+}
+
+/* Основной текст */
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+/* Поля и кнопки используют тот же шрифт */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+/* Заголовки */
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.2;
+  font-weight: 700;
+}

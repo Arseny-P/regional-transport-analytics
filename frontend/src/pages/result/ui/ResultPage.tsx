@@ -7,6 +7,7 @@ import { GraphLayer, isFinalState, useAnalysisJob, type JobState } from '@/entit
 import { ApiError } from '@/shared/api';
 import styles from './ResultPage.module.css';
 import { Button } from '@/shared/ui/button';
+import { Spinner } from '@/shared/ui/spinner';
 
 const STATUS_LABELS: Record<JobState, string> = {
   queued: 'В очереди',
@@ -73,7 +74,7 @@ function JobResult({ jobId }: { jobId: string }) {
       <MapView>{graph && <GraphLayer graph={graph} colorBy={metric || undefined} />}</MapView>
       {isWaiting && (
         <div className={styles.overlay}>
-          <div className={styles.spinner} />
+          <Spinner size="large" />
           <span className={styles.overlayText}>Строим граф...</span>
         </div>
       )}
