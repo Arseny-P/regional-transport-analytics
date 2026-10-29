@@ -299,6 +299,7 @@ class TerritoryAnalysisService:
             connections=connections_data,
             geojson=geojson_payload,
             warnings=warnings,
+            graph_object=log_graph,
         )
 
 
