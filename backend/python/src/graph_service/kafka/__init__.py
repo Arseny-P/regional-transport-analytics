@@ -19,6 +19,8 @@ from .schemas import (
 )
 from .consumer import CommandConsumer
 from .producer import EventProducer
+from .transport import KafkaTransportInterface, MockKafkaTransport, AioKafkaTransport
+from .worker import AnalysisWorker
 
 __all__ = [
     "CommandType",
@@ -40,4 +42,8 @@ __all__ = [
     "KafkaEnvelope",
     "CommandConsumer",
     "EventProducer",
+    "KafkaTransportInterface",
+    "MockKafkaTransport",
+    "AioKafkaTransport",
+    "AnalysisWorker",
 ]

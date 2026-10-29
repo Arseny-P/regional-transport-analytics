@@ -1,22 +1,29 @@
-"""
-Kafka Producer interface for publishing analysis results and status events.
-"""
 from typing import Optional
 from graph_service.config import config
 from graph_service.kafka.schemas import KafkaEnvelope
+from graph_service.kafka.transport import KafkaTransportInterface
 
 
 class EventProducer:
     """
     Отправитель событий в топик analysis.results (STATUS, RESULT).
+    Всегда использует строковый job_id в качестве Kafka key.
     """
 
-    def __init__(self, bootstrap_servers: Optional[str] = None, topic: Optional[str] = None):
-        self.bootstrap_servers = bootstrap_servers or config.kafka.bootstrap_servers
+    def __init__(
+        self,
+        transport: KafkaTransportInterface,
+        topic: Optional[str] = None,
+    ):
+        self.transport = transport
         self.topic = topic or config.kafka.results_topic
 
     async def send_event(self, envelope: KafkaEnvelope) -> None:
         """
         Публикует событие с ключом job_id в топик результатов.
         """
-        pass
+        await self.transport.send(
+            topic=self.topic,
+            key=str(envelope.job_id),
+            value=envelope.to_dict(),
+        )
