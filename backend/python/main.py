@@ -101,16 +101,39 @@ def parse_args():
         help="Путь для сохранения результата AnalysisResponse JSON",
     )
 
+    # 5. Режим фонового микросервиса (Kafka Worker — Спринт 3)
+    parser.add_argument(
+        "--worker",
+        action="store_true",
+        help="Запустить сервис в режиме фонового воркера Kafka",
+    )
+    parser.add_argument(
+        "--mock-kafka",
+        action="store_true",
+        help="Использовать MockKafkaTransport (для локальных оффлайн тестов воркера)",
+    )
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    # СЦЕНАРИЙ 0: Запуск в режиме фонового Kafka воркера (Спринт 3)
+    if args.worker:
+        import asyncio
+        from graph_service.main import run_worker_async
+        try:
+            asyncio.run(run_worker_async(mock_kafka=args.mock_kafka))
+        except KeyboardInterrupt:
+            print("\n[+] Процесс завершен пользователем.")
+        sys.exit(0)
+
     service = TerritoryAnalysisService(default_storage_dir=args.data_dir)
 
     print("=" * 65)
-    print("ТРАНСПОРТНО-ЛОГИСТИЧЕСКИЙ АНАЛИТИЧЕСКИЙ СЕРВИС (СПРИНТ 2)")
-    print("Модульная архитектура: Arbitrary Territory + MultiGraph + Go DTO")
+    print("ТРАНСПОРТНО-ЛОГИСТИЧЕСКИЙ АНАЛИТИЧЕСКИЙ СЕРВИС (СПРИНТ 2 & 3)")
+    print("Модульная архитектура: Arbitrary Territory + MultiGraph + Kafka")
     print("=" * 65)
 
     # СЦЕНАРИЙ А: Прямой вызов через контрактный JSON от Go-бэкенда
