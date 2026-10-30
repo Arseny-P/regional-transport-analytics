@@ -16,8 +16,8 @@
     font-family: 'Arial', sans-serif;
     font-weight: bold;
     font-size: 20px;
-    color: #243746;
-    background-color: #ffffff;
+    color: var(--text-primary);
+    background-color: var(--general-bg);
 }
 
 /* Панель и карта */
@@ -39,7 +39,7 @@
   box-sizing: border-box;
   overflow-y: auto;
 
-  background-color: #ffffff;
+  background-color: var(--general-bg);
 }
 
 /* Место для карты */
@@ -57,13 +57,14 @@
   gap: 8px 24px;
   flex-shrink: 0;
   padding: 8px 16px;
-  background-color: #ffffff;
-  color: #5c6f7b;
+  background-color: var(--general-bg);
+  color: var(--text-secondary);
   font-family: Arial, sans-serif;
   font-size: 12px;
 }
 
 .footer a {
-  color: #147d78;
+  color: var(--accent);
   text-decoration: underline;
 }
+

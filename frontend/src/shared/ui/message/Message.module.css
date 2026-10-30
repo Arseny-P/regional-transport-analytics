@@ -1,0 +1,50 @@
+/* Карточка сообщения. */
+.message {
+  width: min(420px, 100%);
+  box-sizing: border-box;
+  padding: 32px 24px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--general-bg);
+  text-align: center;
+}
+
+/* Заголовок состояния. */
+.title {
+  margin: 0;
+  font-size: 22px;
+  color: var(--text-primary);
+}
+
+/* Место для иконки или индикатора загрузки. */
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Пояснение и рекомендации пользователю. */
+.description {
+  margin: 0;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* Кнопки доступных действий. */
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.actions > * {
+  width: 100%;
+}

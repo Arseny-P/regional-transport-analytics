@@ -96,3 +96,19 @@
   flex-direction: column;
   color: var(--text-primary);
 }
+
+.backButton {
+  display: block;
+  margin: 60% auto 0;
+}
+/* Затемнение карты и карточка на время отправки задачи анализа. */
+.messageOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background-color: rgb(0 0 0 / 30%);
+}
