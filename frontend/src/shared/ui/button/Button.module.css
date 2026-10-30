@@ -3,7 +3,7 @@
   border: 1px solid transparent;
   border-radius: 6px;
 
-  background-color: #147D78;
+  background-color: #147d78;
   color: #ffffff;
 
   font: inherit;
@@ -11,11 +11,11 @@
 }
 
 .button:hover:not(:disabled) {
-  background-color: #10635F;
+  background-color: #10635f;
 }
 
 .button:focus-visible {
-  outline: 2px solid #D8E1E6;
+  outline: 2px solid #d8e1e6;
   outline-offset: 3px;
 }
 

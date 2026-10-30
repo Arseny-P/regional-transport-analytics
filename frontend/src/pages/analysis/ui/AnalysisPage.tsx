@@ -44,9 +44,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="59.88"
             value={latitude1}
-            onChange={(e) =>
-              setPoint1(`${e.target.value},${longitude1}`)
-            }
+            onChange={(e) => setPoint1(`${e.target.value},${longitude1}`)}
             className={styles.input}
           />
         </label>
@@ -57,9 +55,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="29.82"
             value={longitude1}
-            onChange={(e) =>
-              setPoint1(`${latitude1},${e.target.value}`)
-            }
+            onChange={(e) => setPoint1(`${latitude1},${e.target.value}`)}
             className={styles.input}
           />
         </label>
@@ -74,9 +70,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="59.89"
             value={latitude2}
-            onChange={(e) =>
-              setPoint2(`${e.target.value},${longitude2}`)
-            }
+            onChange={(e) => setPoint2(`${e.target.value},${longitude2}`)}
             className={styles.input}
           />
         </label>
@@ -87,9 +81,7 @@ export function AnalysisPage() {
             type="text"
             placeholder="29.83"
             value={longitude2}
-            onChange={(e) =>
-              setPoint2(`${latitude2},${e.target.value}`)
-            }
+            onChange={(e) => setPoint2(`${latitude2},${e.target.value}`)}
             className={styles.input}
           />
         </label>
@@ -117,7 +109,6 @@ export function AnalysisPage() {
     </>
   );
 
-  
   const hint = !selectedArea
     ? 'Выделите участок карты двумя кликами'
     : !transports.length

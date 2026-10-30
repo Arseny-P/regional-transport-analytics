@@ -1,22 +1,39 @@
 # Архитектура frontend
 
-## 1. Текущее состояние
+## 1. Структура приложения
 
-### Структура до миграции
+Миграция на FSD и TypeScript завершена: в `src/` нет `.js`/`.jsx` файлов, `allowJs` выключен.
 
 ```
 src/
-  main.jsx            точка входа, глобальные стили, фикс иконок Leaflet
-  App.jsx             роутер и общий Layout
-  leafletIcons.js     фикс путей к иконкам маркеров Leaflet
-  index.css
-  layout/Layout.jsx   header, выезжающий sidebar, footer
-  components/MapView.jsx   карта и выбор прямоугольной области
-  pages/AnalysisPage.jsx   ввод области и режима, запрос /analyze
-  pages/ResultPage.jsx     iframe с картой результата, запрос /metrics
+  app/
+    main.tsx            точка входа: стили, иконки Leaflet, MSW в dev, рендер App
+    App.tsx             роутер: /start, /analysis, /result внутри AppLayout
+    leafletIcons.ts     фикс путей к иконкам маркеров Leaflet
+    styles/index.css    глобальные стили
+    mocks/              MSW-моки /analysis* для dev-режима
+  pages/
+    start/              стартовый экран
+    analysis/           выбор области и видов транспорта, запуск анализа
+    result/             статус задачи, граф на карте, выбор метрики
+  widgets/
+    app-layout/         header, sidebar (портал AppSidebar), footer
+    map-view/           карта Leaflet с тайлами OSM
+  features/
+    select-area/        выбор прямоугольной области кликами или координатами
+    run-analysis/       создание задачи POST /analysis
+    select-metric/      выбор графовой метрики
+  entities/
+    area/               BBox и функции работы с ним
+    transport-mode/     виды транспорта road | rail | sea и подписи
+    analysis/           типы задачи и графа, heartbeat, получение результата, слой графа
+  shared/
+    api/                HTTP-клиент, ApiError, общие типы
+    config/             API_URL, настройки карты, регион по умолчанию
+    ui/                 переиспользуемые UI-элементы (Button)
 ```
 
-## 2. Целевая структура (FSD)
+## 2. Слои FSD
 
 ```
 src/
@@ -38,44 +55,31 @@ src/
 3. **Alias `@/`** указывает на `src/`. Между slice импортируем через alias, внутри slice относительными путями.
 4. **Сегменты** внутри slice: `ui` (компоненты), `model` (типы, состояние, бизнес-логика), `api` (запросы), `lib` (вспомогательные функции), `config` (константы).
 5. **Нейминг.** Slice в kebab-case (`select-area`), компоненты в PascalCase (`SelectArea.tsx`), только именованные экспорты.
-6. **Новый код пишется на TypeScript** (`.ts`/`.tsx`). JS-файлы допустимы только как ещё не мигрированные.
+6. **Код пишется только на TypeScript** (`.ts`/`.tsx`).
 
 ## 3. Где что размещать
 
-| Что | Куда | Пример |
-|---|---|---|
-| Страница маршрута | `pages/<name>/ui/<Name>Page.tsx` | `pages/analysis` |
-| Общая оболочка, крупный блок | `widgets/<name>` | `widgets/map-view`, `widgets/app-layout` |
-| Действие пользователя | `features/<verb-noun>` | `features/select-area`, `features/run-analysis` |
-| Бизнес-сущность, её типы и функции | `entities/<name>/model`, `entities/<name>/lib` | `entities/area` (`BBox`, `bboxFromPoints`) |
-| Запросы к backend по сущности | `entities/<name>/api` или `features/<name>/api` | `features/run-analysis/api/analyze.ts` |
-| HTTP-клиент, базовый URL | `shared/api`, `shared/config` | `shared/api/client.ts` |
-| Константы и настройки | `shared/config` | `DEFAULT_MAP_CENTER`, `OSM_TILE_URL` |
-| Переиспользуемые UI-элементы (кнопка, спиннер) | `shared/ui` | `shared/ui/spinner` |
-| Общие типы без бизнес-смысла | `shared/lib`, `shared/types` | — |
-| Глобальные стили, провайдеры, роутер | `app/` | `app/styles/index.css` |
+| Что                                            | Куда                                            | Пример                                          |
+| ---------------------------------------------- | ----------------------------------------------- | ----------------------------------------------- |
+| Страница маршрута                              | `pages/<name>/ui/<Name>Page.tsx`                | `pages/analysis`                                |
+| Общая оболочка, крупный блок                   | `widgets/<name>`                                | `widgets/map-view`, `widgets/app-layout`        |
+| Действие пользователя                          | `features/<verb-noun>`                          | `features/select-area`, `features/run-analysis` |
+| Бизнес-сущность, её типы и функции             | `entities/<name>/model`, `entities/<name>/lib`  | `entities/area` (`BBox`, `bboxFromPoints`)      |
+| Запросы к backend по сущности                  | `entities/<name>/api` или `features/<name>/api` | `features/run-analysis/api/createAnalysis.ts`   |
+| HTTP-клиент, базовый URL                       | `shared/api`, `shared/config`                   | `shared/api/client.ts`                          |
+| Константы и настройки                          | `shared/config`                                 | `DEFAULT_MAP_CENTER`, `OSM_TILE_URL`            |
+| Переиспользуемые UI-элементы (кнопка, спиннер) | `shared/ui`                                     | `shared/ui/button`                              |
+| Общие типы без бизнес-смысла                   | `shared/lib`, `shared/types`                    | —                                               |
+| Глобальные стили, провайдеры, роутер           | `app/`                                          | `app/styles/index.css`                          |
 
 Типы хранятся рядом с кодом, которому они принадлежат: тип сущности в `entities/<name>/model/types.ts`, тип ответа API в сегменте `api` того slice, который делает запрос.
 
-## 4. План дальнейшей миграции
+## 4. Сценарий анализа
 
-1. **`shared/api` + `shared/config/env`.** Вынести базовый URL backend в `VITE_API_URL` (`.env`, `.env.example`). Сделать типизированный клиент и описать типы ответов `/analyze`, `/map`, `/metrics`;
-2. **`entities/transport-mode`.** Тип `TransportMode = "road" | "rail" | "sea"` по контракту `backend/api/openapi.yaml` и подписи режимов;
-3. **`widgets/app-layout`.** Перенести `layout/Layout.jsx`, убрав двойное оборачивание (см. ниже);
-4. **`shared/ui`.** Спиннер, кнопки и оверлей загрузки вместо повторяющихся inline-стилей;
-5. **`features/run-analysis`, `pages/analysis`.** Создание задачи `POST /analysis` с `job_id`, сгенерированным на frontend, форма координат и видов транспорта;
-6. **`entities/analysis`, `features/select-metric`, `pages/result`.** Heartbeat и получение результата по `job_id` из URL (`/result?job_id=...`), граф на карте, выбор метрики;
-7. **`app/`.** Перенести `App`, роутер, `index.css`, `leafletIcons`,`main.jsx` → `main.tsx`;
-8. **Выключить `allowJs`**, когда JS-файлов не останется. Удалить неиспользуемый `leaflet-draw`.
+1. `/analysis`: пользователь выделяет область и виды транспорта, `features/run-analysis` отправляет `POST /analysis` с `job_id`, сгенерированным на frontend.
+2. После создания задачи происходит переход на `/result?job_id=...`. Параметры хранятся в URL, поэтому перезагрузка страницы их не теряет.
+3. `/result`: `entities/analysis` шлёт heartbeat по `job_id`, при готовности получает граф и метрики, граф рисуется на карте, метрика выбирается через `features/select-metric`.
 
 ### Моки API
 
 Пока Go API не готов, в dev-режиме запросы `/analysis*` перехватывает MSW (`src/app/mocks`). Моки включаются переменной `VITE_API_MOCKS=true` в `.env`.
-
-## 5. Найденные проблемы (исправить в ходе миграции)
-
-- **Двойной Layout.** `App.jsx` оборачивает маршруты в `Layout`, и каждая страница тоже рендерит свой `Layout`. В итоге header, кнопка меню и footer рендерятся дважды
-- **Мёртвые условия** `mode === "all1"` / `mode !== "all1"` в `ResultPage.jsx`: значения `all1` не существует, ветка «метрики недоступны» никогда не показывается
-- **Дублирование** `@keyframes spin` в двух страницах, много inline-стилей, `marginTop: "450px"` для позиционирования кнопки
-- **Обработка ошибок через `alert`**, состояние области передаётся между страницами через `location.state` и теряется при перезагрузке `/result`. Исправляется использованием `react router`
-- В footer ссылка ведёт на исходный репозиторий `agalikeev/analyze-logistic`.
