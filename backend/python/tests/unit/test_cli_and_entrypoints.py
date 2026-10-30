@@ -67,6 +67,10 @@ class TestCliAndEntrypoints(unittest.TestCase):
         self.assertEqual(res_fail_env.payload["status"], "failed")
         self.assertIsNotNone(res_fail_env.payload["error"]["code"])
 
+    def test_dunder_main_module_importable(self):
+        import graph_service.__main__
+        self.assertIsNotNone(graph_service.__main__.run_worker_cli)
+
 
 if __name__ == "__main__":
     unittest.main()

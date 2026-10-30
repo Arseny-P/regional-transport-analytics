@@ -20,7 +20,7 @@ from .schemas import (
 from .consumer import CommandConsumer
 from .producer import EventProducer
 from .transport import KafkaTransportInterface, MockKafkaTransport, AioKafkaTransport
-from .worker import AnalysisWorker
+from .worker import AnalysisWorker, run_worker_async, run_worker_cli
 
 __all__ = [
     "CommandType",
@@ -46,4 +46,6 @@ __all__ = [
     "MockKafkaTransport",
     "AioKafkaTransport",
     "AnalysisWorker",
+    "run_worker_async",
+    "run_worker_cli",
 ]

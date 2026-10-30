@@ -28,8 +28,8 @@ pytest tests/
 # Стандартный production-запуск:
 python main.py --worker
 
-# Либо через модуль:
-python -m graph_service.main
+# Либо через модуль (PEP 338):
+python -m graph_service
 
 # Локальный запуск без поднятого брокера Kafka (in-memory mock транспорт):
 python main.py --worker --mock-kafka
@@ -82,7 +82,7 @@ src/graph_service/
 │   ├── repository.py   # Абстрактный интерфейс JobRepository
 │   └── memory_repository.py # In-memory хранилище для тестов и локального запуска
 ├── config.py           # Конфигурация брокера, путей и таймаутов
-└── main.py             # Точка входа воркера
+└── __main__.py         # Стандартная точка входа для python -m graph_service
 ```
 
 ---

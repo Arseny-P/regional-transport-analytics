@@ -122,7 +122,7 @@ def main():
     # СЦЕНАРИЙ 0: Запуск в режиме фонового Kafka воркера (Спринт 3)
     if args.worker:
         import asyncio
-        from graph_service.main import run_worker_async
+        from graph_service.kafka import run_worker_async
         try:
             asyncio.run(run_worker_async(mock_kafka=args.mock_kafka))
         except KeyboardInterrupt:
