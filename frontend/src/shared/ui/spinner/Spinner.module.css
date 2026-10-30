@@ -1,0 +1,65 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.spinner {
+  display: block;
+  flex-shrink: 0;
+  color: var(--accent, #147d78);
+  stroke-width: 4;
+  animation: spin 1s linear infinite;
+}
+
+.small {
+  width: 20px;
+  height: 20px;
+}
+
+.medium {
+  width: 40px;
+  height: 40px;
+}
+
+.large {
+  width: 60px;
+  height: 60px;
+}
+
+.track {
+  opacity: 0.2;
+}
+
+.arc {
+  stroke-dasharray: 27 107;
+  stroke-linecap: round;
+}
+
+.text {
+  font-size: 14px;
+  color: var(--text-secondary, #555555);
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}

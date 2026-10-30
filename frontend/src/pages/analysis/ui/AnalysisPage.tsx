@@ -4,7 +4,7 @@ import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
-import { Button } from '@/shared/ui';
+import { Button, Message, Spinner } from '@/shared/ui';
 import type { BBox } from '@/entities/area';
 import {
   DEFAULT_TRANSPORT_MODES,
@@ -100,6 +100,12 @@ export function AnalysisPage() {
           </label>
         ))}
       </div>
+      <Button 
+        className={styles.backButton}
+        onClick={() => navigate('/start')}
+      >
+        К выбору файла
+      </Button>
     </>
   );
 
@@ -131,7 +137,19 @@ export function AnalysisPage() {
         >
           {isLoading ? 'Запуск анализа...' : 'Начать анализ'}
         </Button>
-      </div>
+      </div>    
+      {isLoading && (
+        <div className={styles.messageOverlay}>
+          <Message
+            title="Запускаем анализ"
+            description="Отправляем задачу на обработку."
+            icon={<Spinner text="" />}
+          />
+        </div>
+      )}
     </div>
   );
+
+
 }
+

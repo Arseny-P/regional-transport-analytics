@@ -1,66 +1,79 @@
+/* Контейнер страницы и карты результата. */
 .page,
 .content {
   position: relative;
   width: 100%;
   height: 100%;
+  color: var(--text-primary);
 }
 
+/* Заголовок панели результатов. */
 .title {
   margin-top: 0;
+  color: var(--text-primary);
 }
 
+/* Ошибки анализа и получения задачи. */
 .error {
-  color: #da1e28;
+  color: var(--error-msg);
 }
 
+/* Временные проблемы связи с сервером. */
 .warning {
-  color: #b28600;
+  color: var(--text-secondary);
+  padding: 12px;
+  background-color: var(--second-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }
 
+/* Дополнительные пояснения о метриках. */
 .muted {
   font-size: 14px;
-  color: #666;
+  color: var(--text-secondary);
 }
 
-.newAnalysisButton {
-  width: 100%;
-  margin-top: auto;
-  padding: 10px;
-  border: none;
-  border-radius: 6px;
-  background-color: #e6e6e6;
-  cursor: pointer;
-}
-
+/* Карточка состояния поверх затемнённой карты. */
 .overlay {
   position: absolute;
   inset: 0;
-  z-index: 1000;
+  z-index: 1100;
   display: flex;
-  flex-direction: column;
   justify-content: center;
   align-items: center;
-  gap: 12px;
-  background-color: rgba(255, 255, 255, 0.8);
+  padding: 24px;
+  background-color: rgb(0 0 0 / 30%);
 }
 
-.spinner {
-  width: 50px;
-  height: 50px;
-  border: 6px solid #f3f3f3;
-  border-top-color: #0f62fe;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
+/* Жирная подпись состояния; подключение и очередь выделены нейтрально. */
+.status {
+  font-weight: 700;
+  color: var(--text-secondary);
 }
 
-.overlayText {
-  font-size: 16px;
-  font-weight: bold;
-  color: #0f62fe;
+/* Выполняющаяся задача. */
+.status[data-status='running'] {
+  color: var(--text-primary);
 }
 
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
+/* Успешное завершение анализа. */
+.status[data-status='completed'] {
+  color: var(--accent);
+}
+
+/* Неуспешное завершение анализа. */
+.status[data-status='failed'] {
+  color: var(--error-msg);
+}
+
+/* Ожидание отмены и отменённая задача. */
+.status[data-status='cancel_requested'],
+.status[data-status='canceled'] {
+  color: var(--text-secondary);
+}
+
+/* Кнопка нового анализа — ниже настроек, по центру панели. */
+.newAnalysisButton {
+  display: block;
+  margin: 32px auto 0;
 }
