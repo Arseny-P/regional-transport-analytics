@@ -8,8 +8,8 @@ from graph_service.domain import (
 )
 from graph_service.application import BuildGraphUseCase, TerritoryAnalysisService
 from graph_service.algorithms import RoadNetworkService, FacilityService, LogisticsGraphService
-from graph_service.adapters import execute_with_overpass_fallback, OVERPASS_MIRRORS
-from graph_service.messaging import (
+from graph_service.http import execute_with_overpass_fallback, OVERPASS_MIRRORS
+from graph_service.kafka import (
     KafkaEnvelope,
     CommandType,
     EventType,

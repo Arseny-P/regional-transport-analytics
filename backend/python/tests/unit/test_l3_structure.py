@@ -20,8 +20,6 @@ from graph_service.kafka import (
 )
 from graph_service.http import execute_with_overpass_fallback, OVERPASS_MIRRORS
 from graph_service.db import JobRepository, MemoryJobRepository
-import graph_service.adapters as legacy_adapters
-import graph_service.messaging as legacy_messaging
 
 
 class TestL3Structure(unittest.TestCase):
@@ -59,10 +57,11 @@ class TestL3Structure(unittest.TestCase):
         saved = repo.get_saved_result("job-100")
         self.assertEqual(saved, result_dict)
 
-    def test_backward_compatibility_shims(self):
-        self.assertIs(legacy_adapters.execute_with_overpass_fallback, execute_with_overpass_fallback)
-        self.assertIs(legacy_messaging.KafkaEnvelope, KafkaEnvelope)
-        self.assertIs(legacy_messaging.CommandConsumer, CommandConsumer)
+    def test_clean_l3_modules_structure(self):
+        # Проверяем, что устаревшие пакеты adapters и messaging удалены и заменены на http и kafka
+        import sys
+        self.assertNotIn("graph_service.adapters", sys.modules)
+        self.assertNotIn("graph_service.messaging", sys.modules)
 
 
 if __name__ == "__main__":
