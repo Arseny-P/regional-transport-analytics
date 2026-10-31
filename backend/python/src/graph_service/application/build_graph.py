@@ -21,6 +21,7 @@ from graph_service.domain.errors import (
 from graph_service.algorithms.road_network_service import RoadNetworkService
 from graph_service.algorithms.facility_service import FacilityService
 from graph_service.algorithms.logistics_graph_service import LogisticsGraphService
+from graph_service.application.cancellation import CancellationToken, TaskCancelledException
 
 
 class TerritoryAnalysisService:
@@ -33,10 +34,18 @@ class TerritoryAnalysisService:
     def __init__(self, default_storage_dir: str = "data"):
         self.default_storage_dir = default_storage_dir
 
-    def run_analysis(self, request: AnalysisRequest) -> AnalysisResponse:
+    def run_analysis(
+        self,
+        request: AnalysisRequest,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> AnalysisResponse:
         """
         Запускает полный цикл анализа территории и возвращает структурированный AnalysisResponse.
+        Поддерживает кооперативную отмену через CancellationToken.
         """
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
         start_time = time.time()
         warnings: List[str] = []
         storage_dir = request.output_dir or self.default_storage_dir
@@ -76,6 +85,9 @@ class TerritoryAnalysisService:
         road_alias = f"{alias_base}_roads"
         logistics_alias = f"{alias_base}_logistics"
 
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
         # -----------------------------------------------------------------
         # 2. Получение дорожной сети (кэш или OSM)
         # -----------------------------------------------------------------
@@ -112,6 +124,9 @@ class TerritoryAnalysisService:
                 error_message="Построенный дорожный граф пуст. Проверьте границы территории.",
                 warnings=warnings,
             )
+
+        if cancellation_token:
+            cancellation_token.check_cancelled()
 
         # -----------------------------------------------------------------
         # 3. Подготовка и валидация логистических объектов
@@ -169,6 +184,9 @@ class TerritoryAnalysisService:
                 f"Найдено только {len(all_nodes)} объектов. Для расчета маршрутов между объектами требуется минимум 2."
             )
 
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
         # -----------------------------------------------------------------
         # 4. Привязка объектов к дорожной сети (Snapping)
         # -----------------------------------------------------------------
@@ -185,6 +203,9 @@ class TerritoryAnalysisService:
                 error_message=f"Ошибка пространственной привязки к дорогам: {snap_err}",
                 warnings=warnings,
             )
+
+        if cancellation_token:
+            cancellation_token.check_cancelled()
 
         # -----------------------------------------------------------------
         # 5. Синтез логистического MultiGraph и расчет маршрутов
@@ -299,6 +320,7 @@ class TerritoryAnalysisService:
             connections=connections_data,
             geojson=geojson_payload,
             warnings=warnings,
+            graph_object=log_graph,
         )
 
 

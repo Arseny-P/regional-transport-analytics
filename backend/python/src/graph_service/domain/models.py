@@ -327,6 +327,7 @@ class AnalysisResponse:
     geojson: Optional[Dict[str, Any]] = None
     warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
+    graph_object: Optional[Any] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

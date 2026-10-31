@@ -1,7 +1,9 @@
-from .schemas import (
+from graph_service.kafka.schemas import (
     CommandType,
     EventType,
     TaskStatus,
+    ErrorCode,
+    SUPPORTED_TRANSPORTS,
     MapPoint,
     AreaPayload,
     StartCommandPayload,
@@ -15,13 +17,15 @@ from .schemas import (
     ResultEventPayload,
     KafkaEnvelope,
 )
-from .consumer import CommandConsumer
-from .producer import EventProducer
+from graph_service.kafka.consumer import CommandConsumer
+from graph_service.kafka.producer import EventProducer
 
 __all__ = [
     "CommandType",
     "EventType",
     "TaskStatus",
+    "ErrorCode",
+    "SUPPORTED_TRANSPORTS",
     "MapPoint",
     "AreaPayload",
     "StartCommandPayload",
