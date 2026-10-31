@@ -28,7 +28,7 @@ pytest tests/
 # Стандартный production-запуск:
 python main.py --worker
 
-# Либо через модуль (PEP 338):
+# Либо через модуль:
 python -m graph_service
 
 # Локальный запуск без поднятого брокера Kafka (in-memory mock транспорт):
