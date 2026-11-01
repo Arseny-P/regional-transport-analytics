@@ -1,23 +1,26 @@
+/* Содержимое боковой панели: заголовок, описание, зона загрузки и подсказка. */
 .panel {
   display: flex;
   flex-direction: column;
   gap: 20px;
-  font-family: Arial, sans-serif;
 }
 
+/* Заголовок «Загрузите регион». */
 .title {
   margin: 0;
   font-size: 22px;
   color: #243746;
 }
 
+/* Описание назначения сервиса под заголовком. */
 .description {
   margin: 0;
-  color: #5c6f7b;
+  color: var(--text-secondary);
   line-height: 1.5;
-  font-family: Arial, sans-serif;
 }
 
+/* Визуальная зона загрузки: приглашение перетащить файл и кнопка.
+   CSS задаёт только оформление; обработка файла реализуется отдельно в TSX/логике фичи. */
 .uploadZone {
   display: flex;
   flex-direction: column;
@@ -25,22 +28,23 @@
   gap: 20px;
 
   padding: 32px 20px;
-  border: 1px double #d8e1e6;
+  border: 1px double var(--border);
   border-radius: 0px;
-  background-color: #f3f6f8;
+  background-color: var(--second-bg);
   color: #243746;
   text-align: center;
-  font-family: Arial, sans-serif;
 }
 
+/* Убирает стандартные отступы только у абзацев внутри зоны загрузки. */
 .uploadZone p {
   margin: 0;
 }
 
+/* Подсказка о том, что файл должен содержать границу региона. */
 .hint {
   margin: 0;
   font-size: 14px;
   line-height: 1.5;
-  color: #5c6f7b;
-  font-family: Arial, sans-serif;
+  color: var(--text-secondary);
 }
+

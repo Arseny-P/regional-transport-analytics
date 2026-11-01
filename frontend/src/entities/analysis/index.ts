@@ -9,3 +9,4 @@ export type {
 export { isFinalState } from './model/types';
 export { useAnalysisJob } from './model/useAnalysisJob';
 export { GraphLayer } from './ui/GraphLayer';
+export { METRIC_LABELS } from './config/metricLabels';

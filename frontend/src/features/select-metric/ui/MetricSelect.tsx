@@ -1,4 +1,4 @@
-import type { Metric } from '@/entities/analysis';
+import { METRIC_LABELS, type Metric } from '@/entities/analysis';
 import styles from './MetricSelect.module.css';
 
 interface MetricSelectProps {
@@ -16,7 +16,7 @@ export function MetricSelect({ metrics, value, onChange }: MetricSelectProps) {
         <option value="">Выберите метрику</option>
         {metrics.map((metric) => (
           <option key={metric.name} value={metric.name}>
-            {metric.name}
+            {METRIC_LABELS[metric.name] ?? metric.name}
           </option>
         ))}
       </select>
@@ -28,3 +28,4 @@ export function MetricSelect({ metrics, value, onChange }: MetricSelectProps) {
     </div>
   );
 }
+
