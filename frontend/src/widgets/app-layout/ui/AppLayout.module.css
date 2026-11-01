@@ -7,17 +7,17 @@
 /* Шапка */
 
 .header {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 5%;
-    min-height: 30px;
-    text-align: center;
-    font-family: 'Arial', sans-serif;
-    font-weight: bold;
-    font-size: 20px;
-    color: var(--text-primary);
-    background-color: var(--general-bg);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 5%;
+  min-height: 30px;
+  text-align: center;
+  font-family: 'Arial', sans-serif;
+  font-weight: bold;
+  font-size: 20px;
+  color: var(--text-primary);
+  background-color: var(--general-bg);
 }
 
 /* Панель и карта */
@@ -67,4 +67,3 @@
   color: var(--accent);
   text-decoration: underline;
 }
-

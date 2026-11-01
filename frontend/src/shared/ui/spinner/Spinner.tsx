@@ -6,11 +6,7 @@ interface SpinnerProps {
   text?: string;
 }
 
-export function Spinner({
-  size = 'medium',
-  color,
-  text = 'Загрузка...',
-}: SpinnerProps) {
+export function Spinner({ size = 'medium', color, text = 'Загрузка...' }: SpinnerProps) {
   return (
     <div className={styles.container} role="status">
       <svg

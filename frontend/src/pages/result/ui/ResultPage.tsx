@@ -6,7 +6,7 @@ import { MetricSelect } from '@/features/select-metric';
 import { GraphLayer, isFinalState, useAnalysisJob, type JobState } from '@/entities/analysis';
 import { ApiError } from '@/shared/api';
 import styles from './ResultPage.module.css';
-import { Button, Message, Spinner} from '@/shared/ui';
+import { Button, Message, Spinner } from '@/shared/ui';
 
 const STATUS_LABELS: Record<JobState, string> = {
   queued: 'В очереди',
@@ -66,7 +66,9 @@ function JobResult({ jobId }: { jobId: string }) {
     <p className={styles.error}>Задача не найдена. Запустите новый анализ.</p>
   ) : (
     <>
-      <p className={styles.status} data-status={job?.status} role="status">Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}</p>
+      <p className={styles.status} data-status={job?.status} role="status">
+        Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}
+      </p>
       {job?.error && <p className={styles.error}>{job.error.message}</p>}
       {requestError && <p className={styles.warning}>Нет связи с сервером, повторяем запрос...</p>}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
@@ -76,7 +78,11 @@ function JobResult({ jobId }: { jobId: string }) {
         <MetricSelect metrics={result.metrics} value={metric} onChange={setMetric} />
       ) : (
         <p className={styles.muted}>
-          {isFinal ? 'Метрики не рассчитаны.' : hasGraph ? 'Метрики рассчитываются...' : 'Метрики будут доступны после построения графа.'}
+          {isFinal
+            ? 'Метрики не рассчитаны.'
+            : hasGraph
+              ? 'Метрики рассчитываются...'
+              : 'Метрики будут доступны после построения графа.'}
         </p>
       )}
     </>
@@ -89,31 +95,40 @@ function JobResult({ jobId }: { jobId: string }) {
         <div className={styles.overlay}>
           <Message
             title={waitingTitle}
-            description={requestError
-              ? 'Нет связи с сервером. Повторяем запрос автоматически.'
-              : 'Ожидаем готовности графа выбранной территории.'}
+            description={
+              requestError
+                ? 'Нет связи с сервером. Повторяем запрос автоматически.'
+                : 'Ожидаем готовности графа выбранной территории.'
+            }
             icon={<Spinner size="large" text="" />}
           />
         </div>
       )}
       {notFound && (
         <div className={styles.overlay}>
-          <Message title="Задача не найдена" description="Запустите новый анализ выбранной области." actions={changeArea} />
+          <Message
+            title="Задача не найдена"
+            description="Запустите новый анализ выбранной области."
+            actions={changeArea}
+          />
         </div>
       )}
       {!notFound && isFinal && !hasGraph && (
         <div className={styles.overlay}>
           <Message
-            title={job?.status === 'failed'
-              ? 'Не удалось выполнить анализ'
-              : job?.status === 'canceled'
-                ? 'Анализ отменён'
-                : 'Данные не найдены'}
-            description={job?.error?.message ?? (
-              job?.status === 'canceled'
+            title={
+              job?.status === 'failed'
+                ? 'Не удалось выполнить анализ'
+                : job?.status === 'canceled'
+                  ? 'Анализ отменён'
+                  : 'Данные не найдены'
+            }
+            description={
+              job?.error?.message ??
+              (job?.status === 'canceled'
                 ? 'Можно изменить параметры и запустить анализ снова.'
-                : 'В выбранной области не найдено объектов. Измените область или параметры анализа.'
-            )}
+                : 'В выбранной области не найдено объектов. Измените область или параметры анализа.')
+            }
             actions={changeArea}
           />
         </div>
@@ -133,7 +148,10 @@ export function ResultPage() {
       >
         <MapView />
         <div className={styles.overlay}>
-          <Message title="Нет данных анализа" description="Выберите область и запустите анализ, чтобы увидеть граф." />
+          <Message
+            title="Нет данных анализа"
+            description="Выберите область и запустите анализ, чтобы увидеть граф."
+          />
         </div>
       </ResultLayout>
     );
@@ -141,5 +159,3 @@ export function ResultPage() {
 
   return <JobResult key={jobId} jobId={jobId} />;
 }
-
-
