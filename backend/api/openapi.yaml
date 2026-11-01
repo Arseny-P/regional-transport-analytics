@@ -581,7 +581,6 @@ components:
       prefixItems:
         - {type: number, minimum: -180, maximum: 180}
         - {type: number, minimum: -90, maximum: 90}
-      items: false
       example: [30.3, 59.3]
 
     LinearRing:

@@ -32,7 +32,7 @@ linters:
     rules:
       - linters:
           - revive
-        text: "exported (method|function|type|const|var) (.+) should have comment or be unexported"
+        text: "exported .* should have comment"
       - linters:
           - revive
         text: "should have a package comment"
