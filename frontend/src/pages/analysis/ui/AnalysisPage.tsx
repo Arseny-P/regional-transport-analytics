@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
 import { Button, Message, Spinner } from '@/shared/ui';
 import type { BBox } from '@/entities/area';
+import { RegionBoundary, useRegion } from '@/entities/region';
 import {
   DEFAULT_TRANSPORT_MODES,
   TRANSPORT_MODES,
@@ -16,6 +17,9 @@ import styles from './AnalysisPage.module.css';
 
 export function AnalysisPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const regionId = searchParams.get('region_id');
+  const { region, error: regionError } = useRegion(regionId);
   const [selectedArea, setSelectedArea] = useState<BBox | null>(null);
   const [point1, setPoint1] = useState('');
   const [point2, setPoint2] = useState('');
@@ -100,10 +104,7 @@ export function AnalysisPage() {
           </label>
         ))}
       </div>
-      <Button 
-        className={styles.backButton}
-        onClick={() => navigate('/start')}
-      >
+      <Button className={styles.backButton} onClick={() => navigate('/start')}>
         К выбору файла
       </Button>
     </>
@@ -119,6 +120,7 @@ export function AnalysisPage() {
     <div className={styles.page}>
       <AppSidebar>{sidebarContent}</AppSidebar>
       <MapView>
+        {region && <RegionBoundary region={region} />}
         <SelectArea
           onChange={setSelectedArea}
           point1={point1}
@@ -132,12 +134,21 @@ export function AnalysisPage() {
         <span className={styles.hint}>{hint}</span>
         {error && <span className={styles.error}>{error}</span>}
         <Button
-          onClick={() => selectedArea && run(selectedArea, transports)}
-          disabled={!selectedArea || !transports.length || isLoading}
+          onClick={() => region && selectedArea && run(region.region_id, selectedArea, transports)}
+          disabled={!region || !selectedArea || !transports.length || isLoading}
         >
           {isLoading ? 'Запуск анализа...' : 'Начать анализ'}
         </Button>
-      </div>    
+      </div>
+      {(!regionId || regionError) && (
+        <div className={styles.messageOverlay}>
+          <Message
+            title={regionId ? 'Не удалось загрузить регион' : 'Регион не выбран'}
+            description={regionError?.message ?? 'Выберите регион, чтобы задать область анализа.'}
+            actions={<Button onClick={() => navigate('/start')}>К выбору региона</Button>}
+          />
+        </div>
+      )}
       {isLoading && (
         <div className={styles.messageOverlay}>
           <Message
@@ -149,7 +160,4 @@ export function AnalysisPage() {
       )}
     </div>
   );
-
-
 }
-

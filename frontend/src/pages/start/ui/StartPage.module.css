@@ -48,3 +48,23 @@
   color: var(--text-secondary);
 }
 
+.regions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.select {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  background-color: var(--general-bg);
+}
+
+.error {
+  margin: 0;
+  color: var(--error-msg);
+}

@@ -1,5 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { AnalysisStatus, Graph, Metric } from '@/entities/analysis';
+import type { Region, RegionSummary } from '@/entities/region';
+import type { Position } from '@/shared/api';
 import { API_URL } from '@/shared/config';
 
 interface MapPoint {
@@ -22,12 +24,42 @@ interface MockJob {
   graph: Graph;
 }
 
+interface MockRegion extends RegionSummary {
+  bounds: [minLng: number, minLat: number, maxLng: number, maxLat: number];
+}
+
+const REGIONS: MockRegion[] = [
+  { region_id: 'region-001', name: 'spb.geojson', bounds: [29.4, 59.6, 30.8, 60.25] },
+  { region_id: 'region-002', name: 'leningrad-region.geojson', bounds: [27.7, 58.4, 35.7, 61.3] },
+];
+
+const findRegion = (regionId: unknown) => REGIONS.find((r) => r.region_id === regionId);
+
+function regionOf({ region_id, bounds: [minLng, minLat, maxLng, maxLat] }: MockRegion): Region {
+  const ring: Position[] = [
+    [minLng, minLat],
+    [maxLng, minLat],
+    [maxLng, maxLat],
+    [minLng, maxLat],
+    [minLng, minLat],
+  ];
+  return { region_id, boundary: { type: 'Polygon', coordinates: [ring] } };
+}
+
+function isInside({ bounds: [minLng, minLat, maxLng, maxLat] }: MockRegion, point: MapPoint) {
+  return (
+    point.longitude >= minLng &&
+    point.longitude <= maxLng &&
+    point.latitude >= minLat &&
+    point.latitude <= maxLat
+  );
+}
+
 const STORAGE_KEY = 'mock-analysis-jobs';
 const QUEUE_MS = 1000;
 const GRAPH_MS = 3000;
 const METRICS_MS = 8000;
 const HEARTBEAT_TIMEOUT_MS = 10000;
-const MAX_AREA_SPAN = 1;
 const NODES_COUNT = 15;
 
 const loadJobs = (): Record<string, MockJob> =>
@@ -92,17 +124,26 @@ function findJob(request: Request) {
 }
 
 export const handlers = [
+  http.get(`${API_URL}/regions`, () =>
+    HttpResponse.json(REGIONS.map(({ region_id, name }) => ({ region_id, name })))
+  ),
+
+  http.get(`${API_URL}/regions/:regionId`, ({ params }) => {
+    const region = findRegion(params.regionId);
+    if (!region) return error(404, 'region_not_found', 'Регион не найден.');
+    return HttpResponse.json(regionOf(region));
+  }),
+
   http.post(`${API_URL}/analysis`, async ({ request }) => {
     const jobId = new URL(request.url).searchParams.get('job_id');
     if (!jobId) return error(400, 'bad_request', 'Не передан job_id.');
 
     const body = (await request.json()) as AnalysisBody;
     const { first_point, second_point } = body.area;
+    const region = findRegion(body.region_id);
+    if (!region) return error(404, 'region_not_found', 'Регион не найден.');
     if (!body.transports.length) return error(422, 'validation_error', 'Не выбран вид транспорта.');
-    if (
-      Math.abs(first_point.latitude - second_point.latitude) > MAX_AREA_SPAN ||
-      Math.abs(first_point.longitude - second_point.longitude) > MAX_AREA_SPAN
-    ) {
+    if (!isInside(region, first_point) || !isInside(region, second_point)) {
       return error(422, 'area_outside_region', 'Выделенная область выходит за границу региона.');
     }
 

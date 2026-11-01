@@ -2,7 +2,6 @@ import { useState } from 'react';
 import type { BBox } from '@/entities/area';
 import type { TransportMode } from '@/entities/transport-mode';
 import { ApiError } from '@/shared/api';
-import { DEFAULT_REGION_ID } from '@/shared/config';
 import { createAnalysis, type CreateAnalysisRequest } from '../api/createAnalysis';
 import { errorMessage } from '../lib/errorMessage';
 import { toAnalysisArea } from '../lib/toAnalysisArea';
@@ -22,12 +21,12 @@ export function useRunAnalysis(onSuccess: (jobId: string) => void) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const run = async (area: BBox, transports: TransportMode[]) => {
+  const run = async (regionId: string, area: BBox, transports: TransportMode[]) => {
     setIsLoading(true);
     setError(null);
     try {
       const receipt = await createWithRetry(crypto.randomUUID(), {
-        region_id: DEFAULT_REGION_ID,
+        region_id: regionId,
         area: toAnalysisArea(area),
         transports,
       });

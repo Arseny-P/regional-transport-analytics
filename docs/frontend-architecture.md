@@ -11,7 +11,7 @@ src/
     App.tsx             роутер: /start, /analysis, /result внутри AppLayout
     leafletIcons.ts     фикс путей к иконкам маркеров Leaflet
     styles/index.css    глобальные стили
-    mocks/              MSW-моки /analysis* для dev-режима
+    mocks/              MSW-моки /regions* и /analysis* для dev-режима
   pages/
     start/              стартовый экран
     analysis/           выбор области и видов транспорта, запуск анализа
@@ -25,6 +25,7 @@ src/
     select-metric/      выбор графовой метрики
   entities/
     area/               BBox и функции работы с ним
+    region/             типы региона, GET /regions и /regions/{id}, слой границы на карте
     transport-mode/     виды транспорта road | rail | sea и подписи
     analysis/           типы задачи и графа, heartbeat, получение результата, слой графа
   shared/
@@ -76,10 +77,11 @@ src/
 
 ## 4. Сценарий анализа
 
-1. `/analysis`: пользователь выделяет область и виды транспорта, `features/run-analysis` отправляет `POST /analysis` с `job_id`, сгенерированным на frontend.
-2. После создания задачи происходит переход на `/result?job_id=...`. Параметры хранятся в URL, поэтому перезагрузка страницы их не теряет.
-3. `/result`: `entities/analysis` шлёт heartbeat по `job_id`, при готовности получает граф и метрики, граф рисуется на карте, метрика выбирается через `features/select-metric`.
+1. `/start`: пользователь выбирает регион из `GET /regions`, граница из `GET /regions/{region_id}` показывается на карте, затем переход на `/analysis?region_id=...`.
+2. `/analysis`: по `region_id` загружается граница региона, пользователь выделяет область и виды транспорта, `features/run-analysis` отправляет `POST /analysis` с `job_id`, сгенерированным на frontend.
+3. После создания задачи происходит переход на `/result?job_id=...`. Параметры хранятся в URL, поэтому перезагрузка страницы их не теряет.
+4. `/result`: `entities/analysis` шлёт heartbeat по `job_id`, при готовности получает граф и метрики, граф рисуется на карте, метрика выбирается через `features/select-metric`.
 
 ### Моки API
 
-Пока Go API не готов, в dev-режиме запросы `/analysis*` перехватывает MSW (`src/app/mocks`). Моки включаются переменной `VITE_API_MOCKS=true` в `.env`.
+Пока Go API не готов, в dev-режиме запросы `/regions*` и `/analysis*` перехватывает MSW (`src/app/mocks`). Моки включаются переменной `VITE_API_MOCKS=true` в `.env`.
