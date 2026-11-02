@@ -1,5 +1,7 @@
 package httpdto
 
+import "orchestrator-service/internal/dto"
+
 const (
 	CancelRequested JobState = "cancel_requested"
 	Canceled        JobState = "canceled"
@@ -51,28 +53,6 @@ type AnalysisReceipt struct {
 	Status JobState `json:"status"`
 }
 
-type Graph struct {
-	Edges []struct {
-		Attributes *map[string]interface{} `json:"attributes,omitempty"`
+type Graph = dto.Graph
 
-		Geometry *[]Position `json:"geometry,omitempty"`
-
-		ID Identifier `json:"id"`
-
-		Source string `json:"source"`
-
-		Target string `json:"target"`
-	} `json:"edges"`
-	Nodes []struct {
-		Attributes *map[string]interface{} `json:"attributes,omitempty"`
-
-		ID Identifier `json:"id"`
-
-		Position Position `json:"position"`
-	} `json:"nodes"`
-}
-
-type Metrics = []struct {
-	Name  string  `json:"name"`
-	Value float32 `json:"value"`
-}
+type Metrics = []dto.Metric
