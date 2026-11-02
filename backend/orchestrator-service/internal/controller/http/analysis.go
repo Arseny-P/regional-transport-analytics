@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"orchestrator-service/internal/domain"
+	"orchestrator-service/internal/dto"
 	httpdto "orchestrator-service/internal/dto/http"
 	"sort"
 
@@ -61,7 +62,7 @@ func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 
 		if err != nil {
 			status, _ := ReturnErrorRespWithCode(err)
-			if status >= http.StatusInternalServerError && r.Context().Err() == nil {
+			if status == http.StatusInternalServerError && r.Context().Err() == nil {
 				hc.logger.ErrorContext(r.Context(), "analysis request failed",
 					"job_id", jobID, "region_id", regionID, "error", err)
 			}
@@ -79,6 +80,63 @@ func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 			return
 		}
 
+		hc.WriteResponse(w, http.StatusOK, resp)
+	}
+}
+
+func (hc *HTTPController) GetAnalysisResultHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jobIDString := r.URL.Query().Get("job_id")
+		if jobIDString == "" {
+			hc.writeError(w, errMissingJobID)
+			return
+		}
+		jobID, err := uuid.Parse(jobIDString)
+		if err != nil {
+			hc.writeError(w, errInvalidJobID)
+			return
+		}
+		result, err := hc.usecaseOrchestrator.GetAnalysisResult(r.Context(), jobID)
+		if err != nil {
+			status, _ := ReturnErrorRespWithCode(err)
+			if status == http.StatusInternalServerError && r.Context().Err() == nil {
+				hc.logger.ErrorContext(r.Context(), "get analysis result failed", "job_id", jobID, "error", err)
+			}
+			hc.writeError(w, err)
+			return
+		}
+		resp := httpdto.AnalysisResult{
+			JobID:            result.JobID.String(),
+			Status:           httpdto.JobState(result.Payload.Status),
+			GraphAvailable:   result.GraphAvailable,
+			MetricsAvailable: result.MetricsAvailable,
+			Metrics:          make(httpdto.Metrics, 0, len(result.Payload.Metrics)),
+		}
+		if result.Payload.Error != nil {
+			resp.Error = &httpdto.AnalysisFailure{
+				Code: result.Payload.Error.Code, Message: result.Payload.Error.Message,
+			}
+		}
+		if graph := result.Payload.Graph; graph != nil {
+			resp.Graph = &httpdto.Graph{
+				Nodes: make([]dto.GraphNode, 0, len(graph.Nodes)),
+				Edges: make([]dto.GraphEdge, 0, len(graph.Edges)),
+			}
+			for _, node := range graph.Nodes {
+				resp.Graph.Nodes = append(resp.Graph.Nodes, dto.GraphNode{
+					ID: node.ID, Position: node.Position, Attributes: node.Attributes,
+				})
+			}
+			for _, edge := range graph.Edges {
+				resp.Graph.Edges = append(resp.Graph.Edges, dto.GraphEdge{
+					ID: edge.ID, Source: edge.Source, Target: edge.Target,
+					Geometry: edge.Geometry, Attributes: edge.Attributes,
+				})
+			}
+		}
+		for _, metric := range result.Payload.Metrics {
+			resp.Metrics = append(resp.Metrics, dto.Metric{Name: metric.Name, Value: metric.Value})
+		}
 		hc.WriteResponse(w, http.StatusOK, resp)
 	}
 }
