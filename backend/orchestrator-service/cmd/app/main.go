@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -26,6 +27,7 @@ import (
 	miniostorage "orchestrator-service/internal/adapter/minIO"
 	"orchestrator-service/internal/adapter/postgres"
 	httpcontroller "orchestrator-service/internal/controller/http"
+	kafkacontroller "orchestrator-service/internal/controller/kafka"
 	"orchestrator-service/internal/domain"
 	"orchestrator-service/internal/usecase"
 )
@@ -147,18 +149,38 @@ func runApp(cfg *config.Config, logger *slog.Logger) error {
 
 	orchestrator := usecase.NewUsecase(repository, storage, logger.With("component", "analysis"))
 	controller := httpcontroller.NewHTTPController(orchestrator, logger.With("component", "http"))
-	worker := usecase.NewJobWorker(producer, repository, logger.With("component", "outbox"))
+	worker := usecase.NewOutboxWorker(producer, repository, logger.With("component", "outbox"))
 	workerCtx, stopWorker := context.WithCancel(ctx)
-	workerDone := make(chan struct{})
-	go func() {
-		defer close(workerDone)
-		worker.Run(workerCtx)
-	}()
+	var workers sync.WaitGroup
 	defer func() {
 		stopWorker()
-		<-workerDone
+		workers.Wait()
+	}()
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		worker.Run(workerCtx)
 	}()
 	logger.Info("outbox worker started")
+
+	const consumerCount = 5
+	for i := 0; i < consumerCount; i++ {
+		consumer := kafkacontroller.NewConsumer(cfg.Kafka.Address)
+		consumerLogger := logger.With("component", "inbox", "consumer_id", i+1)
+		inboxWorker := usecase.NewInboxWorker(consumer, repository, producer, consumerLogger)
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			defer func() {
+				if closeErr := consumer.Close(); closeErr != nil {
+					consumerLogger.Error("failed to close Kafka consumer", "error", closeErr)
+				}
+			}()
+			inboxWorker.Run(workerCtx)
+		}()
+	}
+
+	logger.Info("inbox workers started", "count", consumerCount, "topic", "analysis.results", "group_id", "analysis1")
 
 	server := http.Server{
 		Addr: cfg.HTTP.Address, Handler: controller.Routes(),
