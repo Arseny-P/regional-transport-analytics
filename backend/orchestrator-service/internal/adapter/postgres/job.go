@@ -34,6 +34,41 @@ func (p *DB) GetJob(ctx context.Context, jobID uuid.UUID) (domain.Job, error) {
 	return job, nil
 }
 
+func (p *DB) GetAnalysisResult(ctx context.Context, jobID uuid.UUID) (domain.AnalysisResult, error) {
+	result := domain.AnalysisResult{JobID: jobID}
+	var errorCode, errorMessage string
+	var graphJSON, metricsJSON []byte
+	err := p.pool.QueryRow(ctx, `SELECT j.job_status, j.error_code, j.error_message,
+		g.graph, m.metrics, g.job_id IS NOT NULL, m.job_id IS NOT NULL
+		FROM jobs j
+		LEFT JOIN graphs g ON g.job_id = j.id
+		LEFT JOIN metrics m ON m.job_id = j.id
+		WHERE j.id = $1`, jobID).Scan(
+		&result.Payload.Status, &errorCode, &errorMessage,
+		&graphJSON, &metricsJSON, &result.GraphAvailable, &result.MetricsAvailable,
+	)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return domain.AnalysisResult{}, domain.ErrJobNotFound
+		}
+		return domain.AnalysisResult{}, fmt.Errorf("get analysis result: %w: %w", domain.ErrInternalDB, err)
+	}
+	if errorCode != "" || errorMessage != "" {
+		result.Payload.Error = &domain.ErrorResp{Code: errorCode, Message: errorMessage}
+	}
+	if result.GraphAvailable {
+		if err = json.Unmarshal(graphJSON, &result.Payload.Graph); err != nil {
+			return domain.AnalysisResult{}, fmt.Errorf("decode analysis graph: %w: %w", domain.ErrInternalDB, err)
+		}
+	}
+	if result.MetricsAvailable {
+		if err = json.Unmarshal(metricsJSON, &result.Payload.Metrics); err != nil {
+			return domain.AnalysisResult{}, fmt.Errorf("decode analysis metrics: %w: %w", domain.ErrInternalDB, err)
+		}
+	}
+	return result, nil
+}
+
 func (p *DB) CreateJob(ctx context.Context, job *domain.Job) error {
 	tx, err := p.pool.Begin(ctx)
 

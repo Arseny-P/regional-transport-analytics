@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-func (p *DB) GetMessages(ctx context.Context, excessMessages []uuid.UUID) ([]domain.OutboxMessage, error) {
+func (p *DB) GetOutboxMessages(ctx context.Context, excessMessages []uuid.UUID) ([]domain.OutboxMessage, error) {
 
 	messages := []domain.OutboxMessage{}
 	rows, err := p.pool.Query(ctx, `SELECT id,job_id,command_type,payload FROM outbox 
