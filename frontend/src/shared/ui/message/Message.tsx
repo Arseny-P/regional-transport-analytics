@@ -8,12 +8,7 @@ interface MessageProps {
   actions?: ReactNode;
 }
 
-export function Message({
-  title,
-  description,
-  icon,
-  actions,
-}: MessageProps) {
+export function Message({ title, description, icon, actions }: MessageProps) {
   return (
     <section className={styles.message} aria-label={title}>
       <h2 className={styles.title}>{title}</h2>

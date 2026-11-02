@@ -28,4 +28,3 @@ export function MetricSelect({ metrics, value, onChange }: MetricSelectProps) {
     </div>
   );
 }
-
