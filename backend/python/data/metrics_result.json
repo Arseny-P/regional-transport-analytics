@@ -1,0 +1,30 @@
+{
+  "graph_metrics": {
+    "node_count": 4,
+    "edge_count": 2,
+    "directed_route_count": 3,
+    "component_count": 2
+  },
+  "node_metrics": {
+    "A": {
+      "reachable_count": 2,
+      "average_distance_m": 2650.0,
+      "weighted_closeness": 0.2516
+    },
+    "B": {
+      "reachable_count": 2,
+      "average_distance_m": 2000.0,
+      "weighted_closeness": 0.3333
+    },
+    "C": {
+      "reachable_count": 0,
+      "average_distance_m": null,
+      "weighted_closeness": 0.0
+    },
+    "D": {
+      "reachable_count": 0,
+      "average_distance_m": null,
+      "weighted_closeness": 0.0
+    }
+  }
+}

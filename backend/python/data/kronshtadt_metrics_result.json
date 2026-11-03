@@ -1,0 +1,35 @@
+{
+  "graph_metrics": {
+    "node_count": 5,
+    "edge_count": 10,
+    "directed_route_count": 20,
+    "component_count": 1
+  },
+  "node_metrics": {
+    "hub_merch_port": {
+      "reachable_count": 4,
+      "average_distance_m": 3324.275,
+      "weighted_closeness": 0.3008
+    },
+    "hub_marine_plant": {
+      "reachable_count": 4,
+      "average_distance_m": 3163.175,
+      "weighted_closeness": 0.3161
+    },
+    "hub_kad_logistics": {
+      "reachable_count": 4,
+      "average_distance_m": 4210.875,
+      "weighted_closeness": 0.2375
+    },
+    "hub_west_terminal": {
+      "reachable_count": 4,
+      "average_distance_m": 3892.375,
+      "weighted_closeness": 0.2569
+    },
+    "hub_sorting_center": {
+      "reachable_count": 4,
+      "average_distance_m": 2664.525,
+      "weighted_closeness": 0.3753
+    }
+  }
+}
