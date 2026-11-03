@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 )
 
-type JobWorker struct {
+type OutboxWorker struct {
 	chSlice          []chan domain.OutboxMessage
-	kafkaProducer    KafkaProducer
+	kafkaProducer    KafkaOutboxProducer
 	outboxRepository OutboxRepository
 	logger           *slog.Logger
 }
@@ -23,12 +23,12 @@ type retryMessage struct {
 	message domain.OutboxMessage
 }
 
-func NewJobWorker(producer KafkaProducer, store OutboxRepository, logger *slog.Logger) *JobWorker {
+func NewOutboxWorker(producer KafkaOutboxProducer, store OutboxRepository, logger *slog.Logger) *OutboxWorker {
 	channels := make([]chan domain.OutboxMessage, 5)
 	for i := range channels {
 		channels[i] = make(chan domain.OutboxMessage, 5)
 	}
-	return &JobWorker{
+	return &OutboxWorker{
 		chSlice:          channels,
 		kafkaProducer:    producer,
 		outboxRepository: store,
@@ -36,7 +36,7 @@ func NewJobWorker(producer KafkaProducer, store OutboxRepository, logger *slog.L
 	}
 }
 
-func (jw *JobWorker) Run(ctx context.Context) {
+func (ow *OutboxWorker) Run(ctx context.Context) {
 
 	mu := &sync.Mutex{}
 	m := make(map[string]retryMessage)
@@ -46,9 +46,9 @@ func (jw *JobWorker) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			err = jw.kafkaProducer.WriteMessage(ctx, &message)
+			err = ow.kafkaProducer.WriteOutboxMessage(ctx, &message)
 			if err != nil {
-				jw.logger.DebugContext(ctx, "Kafka send attempt failed",
+				ow.logger.DebugContext(ctx, "Kafka send attempt failed",
 					"job_id", message.JobID, "message_id", message.ID,
 					"command_type", message.CommandType, "attempt", try, "error", err)
 				if !waitContext(ctx, 500*time.Millisecond+time.Duration(2*try)*100*time.Millisecond) {
@@ -71,7 +71,7 @@ func (jw *JobWorker) Run(ctx context.Context) {
 			mu.Unlock()
 		}
 		if err != nil {
-			jw.logger.WarnContext(ctx, "Kafka send failed; scheduling retry",
+			ow.logger.WarnContext(ctx, "Kafka send failed; scheduling retry",
 				"job_id", message.JobID, "message_id", message.ID,
 				"command_type", message.CommandType, "error", err)
 			addJobToMap()
@@ -79,10 +79,10 @@ func (jw *JobWorker) Run(ctx context.Context) {
 
 		}
 
-		err = jw.outboxRepository.SetReadyOutboxMessage(ctx, message.ID)
+		err = ow.outboxRepository.SetReadyOutboxMessage(ctx, message.ID)
 
 		if err != nil {
-			jw.logger.WarnContext(ctx, "outbox READY update failed; scheduling retry",
+			ow.logger.WarnContext(ctx, "outbox READY update failed; scheduling retry",
 				"job_id", message.JobID, "message_id", message.ID,
 				"command_type", message.CommandType, "error", err)
 			addJobToMap()
@@ -92,16 +92,16 @@ func (jw *JobWorker) Run(ctx context.Context) {
 		mu.Lock()
 		delete(m, message.JobID.String())
 		mu.Unlock()
-		jw.logger.InfoContext(ctx, "outbox command delivered",
+		ow.logger.InfoContext(ctx, "outbox command delivered",
 			"job_id", message.JobID, "message_id", message.ID, "command_type", message.CommandType)
 	}
 	var workers sync.WaitGroup
 	defer workers.Wait()
-	for i := 0; i < len(jw.chSlice); i++ {
+	for i := 0; i < len(ow.chSlice); i++ {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			jw.runShard(ctx, i, mu, m, handleMessage)
+			ow.runShard(ctx, i, mu, m, handleMessage)
 		}()
 	}
 
@@ -116,13 +116,13 @@ func (jw *JobWorker) Run(ctx context.Context) {
 		}
 
 		mu.Unlock()
-		messages, err := jw.outboxRepository.GetMessages(ctx, slice)
+		messages, err := ow.outboxRepository.GetOutboxMessages(ctx, slice)
 		slice = slice[:0]
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
-			jw.logger.ErrorContext(ctx, "failed to read outbox", "error", err)
+			ow.logger.ErrorContext(ctx, "failed to read outbox", "error", err)
 		}
 		if err != nil || len(messages) == 0 {
 			if !waitContext(ctx, time.Second) {
@@ -144,18 +144,18 @@ func (jw *JobWorker) Run(ctx context.Context) {
 			}
 
 			mu.Unlock()
-			shard := crc32.ChecksumIEEE(message.JobID[:]) % uint32(len(jw.chSlice))
+			shard := crc32.ChecksumIEEE(message.JobID[:]) % uint32(len(ow.chSlice))
 			select {
 			case <-ctx.Done():
 				return
-			case jw.chSlice[shard] <- message:
+			case ow.chSlice[shard] <- message:
 			}
 		}
 
 	}
 }
 
-func (jw *JobWorker) runShard(ctx context.Context, shard int, mu *sync.Mutex,
+func (ow *OutboxWorker) runShard(ctx context.Context, shard int, mu *sync.Mutex,
 	pending map[string]retryMessage, handleMessage func(domain.OutboxMessage)) {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
@@ -163,14 +163,14 @@ func (jw *JobWorker) runShard(ctx context.Context, shard int, mu *sync.Mutex,
 		select {
 		case <-ctx.Done():
 			return
-		case message := <-jw.chSlice[shard]:
+		case message := <-ow.chSlice[shard]:
 			handleMessage(message)
 		case <-ticker.C:
 			mu.Lock()
 			var message domain.OutboxMessage
 			var found bool
 			for _, item := range pending {
-				messageShard := crc32.ChecksumIEEE(item.message.JobID[:]) % uint32(len(jw.chSlice))
+				messageShard := crc32.ChecksumIEEE(item.message.JobID[:]) % uint32(len(ow.chSlice))
 				if messageShard != uint32(shard) {
 					continue
 				}

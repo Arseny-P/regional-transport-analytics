@@ -11,6 +11,10 @@ import (
 	"github.com/peterstace/simplefeatures/geom"
 )
 
+func (u *Usecase) GetAnalysisResult(ctx context.Context, jobID uuid.UUID) (domain.AnalysisResult, error) {
+	return u.jobRepository.GetAnalysisResult(ctx, jobID)
+}
+
 func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
 	p1Latitude, p1Longitude, p2Latitude, p2Longitude float32, transportTypes []domain.Transport) (domain.JobStatus, bool, error) {
 	inputJob := domain.Job{

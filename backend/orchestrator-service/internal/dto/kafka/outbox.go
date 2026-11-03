@@ -1,6 +1,10 @@
 package kafkadto
 
-import "github.com/google/uuid"
+import (
+	"orchestrator-service/internal/dto"
+
+	"github.com/google/uuid"
+)
 
 type OutboxMessage struct {
 	MessageID uuid.UUID      `json:"message_id"`
@@ -14,12 +18,6 @@ type CommandPayload struct {
 	Transports []string `json:"transports,omitempty"`
 }
 
-type Area struct {
-	FirstPoint  MapPoint `json:"first_point"`
-	SecondPoint MapPoint `json:"second_point"`
-}
+type Area = dto.AnalysisArea
 
-type MapPoint struct {
-	Latitude  float32 `json:"latitude"`
-	Longitude float32 `json:"longitude"`
-}
+type MapPoint = dto.MapPoint

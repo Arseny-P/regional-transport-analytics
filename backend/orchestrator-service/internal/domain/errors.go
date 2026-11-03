@@ -5,6 +5,7 @@ import "errors"
 var (
 	ErrInternalDB            = errors.New("INTERNAL_DB")
 	ErrInternalServer        = errors.New("INTERNAL_SERVER")
+	ErrInvalidKafkaMessage   = errors.New("INVALID_KAFKA_MESSAGE")
 	ErrJobConflict           = errors.New("THIS_JOB_ALREADY_EXISTS")
 	ErrJobNotFound           = errors.New("JOB_NOT_FOUND")
 	ErrRegionNotFound        = errors.New("REGION_NOT_FOUND")

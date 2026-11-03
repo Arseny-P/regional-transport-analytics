@@ -1,17 +1,12 @@
 package httpdto
 
+import "orchestrator-service/internal/dto"
+
 type Transports = []string
 
-type MapPoint struct {
-	Latitude  float32 `json:"latitude"`
-	Longitude float32 `json:"longitude"`
-}
+type MapPoint = dto.MapPoint
 
-type AnalysisArea struct {
-	FirstPoint MapPoint `json:"first_point"`
-
-	SecondPoint MapPoint `json:"second_point"`
-}
+type AnalysisArea = dto.AnalysisArea
 
 type CancelAnalysisParams struct {
 	JobID JobID `form:"job_id" json:"job_id"`

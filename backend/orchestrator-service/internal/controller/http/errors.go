@@ -27,7 +27,7 @@ func ReturnErrorRespWithCode(err error) (int, httpdto.Error) {
 			Message: "Укажи job_id в параметрах запроса",
 		}
 	case errors.Is(err, errInvalidJobID):
-		return http.StatusUnprocessableEntity, httpdto.Error{
+		return http.StatusBadRequest, httpdto.Error{
 			Code: "invalid_job_id", Field: "job_id",
 			Message: "job_id должен быть UUID",
 		}
@@ -78,15 +78,15 @@ func ReturnErrorRespWithCode(err error) (int, httpdto.Error) {
 			Field:   "job_id",
 			Message: "Этот job_id уже используется для анализа с другими параметрами",
 		}
+	case errors.Is(err, domain.ErrJobNotFound):
+		return http.StatusNotFound, httpdto.Error{
+			Code: "job_not_found", Field: "job_id",
+			Message: "Задача не найдена",
+		}
 	case errors.Is(err, domain.ErrInternalDB):
 		return http.StatusInternalServerError, httpdto.InternalError{
 			Code:    "internal_db_error",
 			Message: "Не удалось выполнить операцию с базой данных",
-		}
-	case errors.Is(err, domain.ErrInternalServer):
-		return http.StatusInternalServerError, httpdto.InternalError{
-			Code:    "internal_error",
-			Message: "Внутренняя ошибка сервера",
 		}
 	}
 

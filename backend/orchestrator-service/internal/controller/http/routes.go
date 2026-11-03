@@ -8,5 +8,6 @@ func (hc *HTTPController) Routes() http.Handler {
 		w.WriteHeader(http.StatusOK)
 	})
 	mux.HandleFunc("POST /analysis", hc.CreateAnalysisHandler())
+	mux.HandleFunc("GET /analysis/result", hc.GetAnalysisResultHandler())
 	return hc.LoggingMiddleware(hc.RecoverMiddleware(mux))
 }

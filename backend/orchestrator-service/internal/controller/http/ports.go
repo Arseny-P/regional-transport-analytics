@@ -8,5 +8,6 @@ import (
 )
 
 type UsecaseOrchestrator interface {
+	GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error)
 	CreateJob(context.Context, uuid.UUID, uuid.UUID, float32, float32, float32, float32, []domain.Transport) (domain.JobStatus, bool, error)
 }

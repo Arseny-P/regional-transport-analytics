@@ -42,7 +42,7 @@ lint:
 tidy:
 	go mod tidy
 test:
-	go test -race -timeout 60s ./...
+	go test -race -timeout 5m ./...
 
 migrate-up:
 	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations up

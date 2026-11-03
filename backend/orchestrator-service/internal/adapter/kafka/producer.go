@@ -17,7 +17,6 @@ func NewProducer(address string) *Producer {
 	return &Producer{
 		writer: &kafka.Writer{
 			Addr:                   kafka.TCP(address),
-			Topic:                  "analysis.commands",
 			Balancer:               &kafka.Hash{},
 			RequiredAcks:           kafka.RequireAll,
 			AllowAutoTopicCreation: true,
@@ -25,7 +24,7 @@ func NewProducer(address string) *Producer {
 	}
 }
 
-func (p *Producer) WriteMessage(ctx context.Context, message *domain.OutboxMessage) error {
+func (p *Producer) WriteOutboxMessage(ctx context.Context, message *domain.OutboxMessage) error {
 
 	envelope := kafkadto.OutboxMessage{
 		MessageID: message.ID,
@@ -59,10 +58,33 @@ func (p *Producer) WriteMessage(ctx context.Context, message *domain.OutboxMessa
 		return domain.ErrInternalServer
 	}
 	return p.writer.WriteMessages(ctx, kafka.Message{
+		Topic: "analysis.commands",
 		Key:   []byte(message.JobID.String()),
 		Value: messageValue,
 	})
 
+}
+
+func (p *Producer) WriteDLQMessage(ctx context.Context, message *domain.DLQMessage) error {
+	dtoMessage := kafkadto.DLQMessage{
+		JobID:     message.JobID,
+		Key:       message.Key,
+		Topic:     message.Topic,
+		Partition: message.Partition,
+		Offset:    message.Offset,
+		Payload:   message.Payload,
+		Error:     message.Error,
+	}
+	messageValue, err := json.Marshal(dtoMessage)
+	if err != nil {
+		return domain.ErrInternalServer
+	}
+
+	return p.writer.WriteMessages(ctx, kafka.Message{
+		Topic: "analysis.results.dlq",
+		Key:   message.Key,
+		Value: messageValue,
+	})
 }
 
 func (p *Producer) Close() error {
