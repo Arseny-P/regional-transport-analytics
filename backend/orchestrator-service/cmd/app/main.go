@@ -147,7 +147,7 @@ func runApp(cfg *config.Config, logger *slog.Logger) error {
 	logger.Info("Kafka producer initialized", "topic", "analysis.commands")
 	startupCancel()
 
-	orchestrator := usecase.NewUsecase(repository, storage, logger.With("component", "analysis"))
+	orchestrator := usecase.NewUsecase(repository, repository, storage, logger.With("component", "analysis"))
 	controller := httpcontroller.NewHTTPController(orchestrator, logger.With("component", "http"))
 	worker := usecase.NewOutboxWorker(producer, repository, logger.With("component", "outbox"))
 	workerCtx, stopWorker := context.WithCancel(ctx)
