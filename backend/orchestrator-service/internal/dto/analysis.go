@@ -1,8 +1,8 @@
 package dto
 
 type MapPoint struct {
-	Latitude  float32 `json:"latitude"`
-	Longitude float32 `json:"longitude"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
 }
 
 type AnalysisArea struct {
@@ -17,7 +17,7 @@ type Graph struct {
 
 type GraphNode struct {
 	ID         string         `json:"id"`
-	Position   []float32      `json:"position"`
+	Position   []float64      `json:"position"`
 	Attributes map[string]any `json:"attributes,omitempty"`
 }
 
@@ -25,7 +25,7 @@ type GraphEdge struct {
 	ID         string         `json:"id"`
 	Source     string         `json:"source"`
 	Target     string         `json:"target"`
-	Geometry   [][]float32    `json:"geometry,omitempty"`
+	Geometry   [][]float64    `json:"geometry,omitempty"`
 	Attributes map[string]any `json:"attributes,omitempty"`
 }
 

@@ -1,10 +1,13 @@
 package httpdto
 
-import "encoding/json"
+import "orchestrator-service/internal/dto"
 
 type Position = []float64
 
-type BoundaryGeometry struct {
-	Type        string          `json:"type"`
-	Coordinates json.RawMessage `json:"coordinates"`
-}
+type LinearRing []Position
+
+type PolygonCoordinates []LinearRing
+
+type MultiPolygonCoordinates []PolygonCoordinates
+
+type BoundaryGeometry = dto.BoundaryGeometry

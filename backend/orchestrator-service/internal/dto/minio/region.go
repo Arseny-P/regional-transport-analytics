@@ -1,6 +1,6 @@
 package miniodto
 
-import "encoding/json"
+import "orchestrator-service/internal/dto"
 
 type Region struct {
 	Type     string          `json:"type"`
@@ -13,7 +13,4 @@ type RegionFeature struct {
 	Geometry   RegionGeometry `json:"geometry"`
 }
 
-type RegionGeometry struct {
-	Type        string          `json:"type"`
-	Coordinates json.RawMessage `json:"coordinates"`
-}
+type RegionGeometry = dto.BoundaryGeometry
