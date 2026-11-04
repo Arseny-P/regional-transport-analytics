@@ -10,15 +10,22 @@ import (
 )
 
 type JobRepository interface {
-	GetRegionInfo(context.Context, uuid.UUID) (domain.ObjectKey, error)
 	GetJob(context.Context, uuid.UUID) (domain.Job, error)
 	GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error)
 	CreateJob(context.Context, *domain.Job) error
 }
 
+type RegionRepository interface {
+	GetRegionInfo(context.Context, uuid.UUID) (domain.ObjectKey, error)
+	CreateRegionInfo(context.Context, domain.ObjectKey, uuid.UUID) error
+	GetRegionsInfo(context.Context) ([]domain.RegionRecord, error)
+}
+
 type MinIO interface {
 	StatObject(context.Context, domain.ObjectKey) error
 	GetObject(context.Context, domain.ObjectKey) (miniodto.Region, error)
+	FPutObject(context.Context, domain.ObjectKey, string) error
+	RemoveObject(context.Context, domain.ObjectKey) error
 }
 
 type KafkaOutboxProducer interface {

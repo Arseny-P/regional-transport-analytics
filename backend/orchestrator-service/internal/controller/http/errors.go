@@ -8,10 +8,15 @@ import (
 )
 
 var (
-	errMissingJobID    = errors.New("missing job_id")
-	errInvalidJobID    = errors.New("invalid job_id")
-	errInvalidJSON     = errors.New("invalid JSON")
-	errInvalidRegionID = errors.New("invalid region_id")
+	errMissingJobID         = errors.New("missing job_id")
+	errInvalidJobID         = errors.New("invalid job_id")
+	errInvalidJSON          = errors.New("invalid JSON")
+	errInvalidRegionID      = errors.New("invalid region_id")
+	errInvalidRegionPathID  = errors.New("invalid region_id in path")
+	errEntityTooLarge       = errors.New("entity too large")
+	errMissingFile          = errors.New("missing file")
+	errInvalidMultipart     = errors.New("invalid multipart form")
+	errUnsupportedMediaType = errors.New("unsupported media type")
 )
 
 func (hc *HTTPController) writeError(w http.ResponseWriter, err error) {
@@ -21,6 +26,22 @@ func (hc *HTTPController) writeError(w http.ResponseWriter, err error) {
 
 func ReturnErrorRespWithCode(err error) (int, httpdto.Error) {
 	switch {
+	case errors.Is(err, errEntityTooLarge):
+		return http.StatusRequestEntityTooLarge, httpdto.Error{
+			Code: "file_too_large", Field: "file", Message: "Размер файла не должен превышать 20 000 000 байт",
+		}
+	case errors.Is(err, errMissingFile):
+		return http.StatusBadRequest, httpdto.Error{
+			Code: "missing_file", Field: "file", Message: "Передай файл в поле file",
+		}
+	case errors.Is(err, errInvalidMultipart):
+		return http.StatusBadRequest, httpdto.Error{
+			Code: "invalid_multipart", Field: "file", Message: "Передай ровно один файл в multipart/form-data",
+		}
+	case errors.Is(err, errUnsupportedMediaType):
+		return http.StatusUnsupportedMediaType, httpdto.Error{
+			Code: "unsupported_media_type", Message: "Ожидается multipart/form-data",
+		}
 	case errors.Is(err, errMissingJobID):
 		return http.StatusBadRequest, httpdto.Error{
 			Code: "missing_job_id", Field: "job_id",
@@ -36,10 +57,20 @@ func ReturnErrorRespWithCode(err error) (int, httpdto.Error) {
 			Code:    "invalid_json",
 			Message: "Тело запроса должно содержать корректный JSON-объект",
 		}
+	case errors.Is(err, errInvalidRegionPathID):
+		return http.StatusBadRequest, httpdto.Error{
+			Code: "invalid_region_id", Field: "region_id",
+			Message: "region_id должен быть UUID",
+		}
 	case errors.Is(err, errInvalidRegionID):
 		return http.StatusUnprocessableEntity, httpdto.Error{
 			Code: "invalid_region_id", Field: "region_id",
 			Message: "region_id должен быть UUID",
+		}
+	case errors.Is(err, domain.ErrInvalidRegionFile):
+		return http.StatusUnprocessableEntity, httpdto.Error{
+			Code: "invalid_region_file", Field: "file",
+			Message: "Файл должен содержать непустую FeatureCollection с корректными границами Polygon или MultiPolygon",
 		}
 	case errors.Is(err, domain.ErrInvalidCoordinates):
 		return http.StatusUnprocessableEntity, httpdto.Error{

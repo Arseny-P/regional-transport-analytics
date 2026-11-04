@@ -1,5 +1,7 @@
 package httpdto
 
+import "orchestrator-service/internal/dto"
+
 type Region struct {
 	Boundary BoundaryGeometry `json:"boundary"`
 
@@ -13,3 +15,7 @@ type RegionSummary struct {
 
 	RegionID Identifier `json:"region_id"`
 }
+
+type RegionFeatureCollection = dto.RegionFeatureCollection
+
+type RegionFeature = dto.RegionFeature

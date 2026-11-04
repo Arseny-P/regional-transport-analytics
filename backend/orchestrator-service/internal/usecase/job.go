@@ -2,10 +2,10 @@ package usecase
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"orchestrator-service/internal/domain"
+	"orchestrator-service/internal/dto"
 
 	"github.com/google/uuid"
 	"github.com/peterstace/simplefeatures/geom"
@@ -16,7 +16,7 @@ func (u *Usecase) GetAnalysisResult(ctx context.Context, jobID uuid.UUID) (domai
 }
 
 func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
-	p1Latitude, p1Longitude, p2Latitude, p2Longitude float32, transportTypes []domain.Transport) (domain.JobStatus, bool, error) {
+	p1Latitude, p1Longitude, p2Latitude, p2Longitude float64, transportTypes []domain.Transport) (domain.JobStatus, bool, error) {
 	inputJob := domain.Job{
 		JobID:          jobID,
 		RegionID:       regionID,
@@ -45,7 +45,7 @@ func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
 			"job_id", jobID, "region_id", regionID, "status", databaseJob.Status)
 		return databaseJob.Status, false, nil
 	}
-	objectKey, err := u.jobRepository.GetRegionInfo(ctx, regionID)
+	objectKey, err := u.regionRepository.GetRegionInfo(ctx, regionID)
 	if err != nil {
 		return "", false, err
 	}
@@ -58,21 +58,20 @@ func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
 		return "", false, err
 	}
 
-	geometrySlice, err := json.Marshal(region.Features[0].Geometry)
-	if err != nil {
-		return "", false, fmt.Errorf("encode region geometry: %w: %w", domain.ErrInternalServer, err)
+	boundaries := make([]dto.BoundaryGeometry, 0, len(region.Features))
+	for _, feature := range region.Features {
+		boundaries = append(boundaries, feature.Geometry)
 	}
-	regionGeometry, err := geom.UnmarshalGeoJSON(geometrySlice)
-
+	regionGeometry, err := mergeRegionGeometries(boundaries)
 	if err != nil {
-		return "", false, fmt.Errorf("parse region geometry: %w: %w", domain.ErrInternalServer, err)
+		return "", false, fmt.Errorf("parse stored region geometry: %w: %v", domain.ErrInvalidRegionData, err)
 	}
 	rectangle := geom.NewEnvelope(geom.XY{
-		X: float64(p1Longitude),
-		Y: float64(p1Latitude),
+		X: p1Longitude,
+		Y: p1Latitude,
 	}, geom.XY{
-		X: float64(p2Longitude),
-		Y: float64(p2Latitude),
+		X: p2Longitude,
+		Y: p2Latitude,
 	})
 	rectangleGeometry := rectangle.AsGeometry()
 

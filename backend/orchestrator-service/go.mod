@@ -10,6 +10,7 @@ require (
 	github.com/peterstace/simplefeatures v0.59.0
 	github.com/pressly/goose/v3 v3.26.0
 	github.com/segmentio/kafka-go v0.4.51
+	github.com/stretchr/testify v1.12.1
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/kafka v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
@@ -66,7 +67,6 @@ require (
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	github.com/shirou/gopsutil/v4 v4.26.6 // indirect
 	github.com/sirupsen/logrus v1.10.2 // indirect
-	github.com/stretchr/testify v1.12.1 // indirect
 	github.com/tinylib/msgp v1.6.4 // indirect
 	github.com/tklauser/go-sysconf v0.4.0 // indirect
 	github.com/tklauser/numcpus v0.12.0 // indirect

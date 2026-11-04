@@ -25,8 +25,8 @@ type Job struct {
 }
 
 type MapPoint struct {
-	Latitude  float32
-	Longitude float32
+	Latitude  float64
+	Longitude float64
 }
 
 type JobStatus string
