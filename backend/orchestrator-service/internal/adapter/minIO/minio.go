@@ -36,6 +36,11 @@ func (mio *MinIO) FPutObject(ctx context.Context, objectKey domain.ObjectKey, fi
 	return storageError(err)
 }
 
+func (mio *MinIO) RemoveObject(ctx context.Context, objectKey domain.ObjectKey) error {
+	err := mio.client.RemoveObject(ctx, regionBucket, string(objectKey), minio.RemoveObjectOptions{})
+	return storageError(err)
+}
+
 func (mio *MinIO) GetObject(ctx context.Context, objectKey domain.ObjectKey) (miniodto.Region, error) {
 	resp, err := mio.client.GetObject(ctx, regionBucket, string(objectKey), minio.GetObjectOptions{})
 	if err != nil {
