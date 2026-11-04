@@ -49,7 +49,7 @@ type Graph struct {
 
 type GraphNode struct {
 	ID         string
-	Position   []float32
+	Position   []float64
 	Attributes map[string]any
 }
 
@@ -57,7 +57,7 @@ type GraphEdge struct {
 	ID         string
 	Source     string
 	Target     string
-	Geometry   [][]float32
+	Geometry   [][]float64
 	Attributes map[string]any
 }
 

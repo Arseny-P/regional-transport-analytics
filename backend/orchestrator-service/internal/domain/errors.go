@@ -11,6 +11,8 @@ var (
 	ErrRegionNotFound        = errors.New("REGION_NOT_FOUND")
 	ErrInternalStorage       = errors.New("INTERNAL_STORAGE")
 	ErrInvalidRegionData     = errors.New("INVALID_REGION_DATA")
+	ErrInvalidRegionFile     = errors.New("INVALID_REGION_FILE")
+	ErrRegionInsertRejected  = errors.New("REGION_INSERT_REJECTED")
 	ErrInvalidCoordinates    = errors.New("INVALID_COORDINATES")
 	ErrInvalidArea           = errors.New("INVALID_AREA")
 	ErrAreaOutOfBounds       = errors.New("AREA_OUT_OF_BOUNDS")
