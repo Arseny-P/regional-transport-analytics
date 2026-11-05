@@ -74,8 +74,8 @@ def parse_args():
     parser.add_argument(
         "--max-snap-distance",
         type=float,
-        default=None,
-        help="Максимальное допустимое расстояние привязки объекта к дороге в метрах (по умолчанию: без ограничений)",
+        default=250.0,
+        help="Максимальное допустимое расстояние привязки объекта к дороге в метрах (по умолчанию: 250.0 м)",
     )
     parser.add_argument(
         "--refetch",

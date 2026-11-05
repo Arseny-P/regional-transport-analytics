@@ -83,83 +83,109 @@ class AnalysisWorker:
         await self.transport.stop()
         print("[*] Kafka AnalysisWorker остановлен.")
 
-    async def handle_command(self, envelope: KafkaEnvelope) -> None:
+    async def handle_command(self, envelope: KafkaEnvelope, ctx: Optional[Any] = None) -> None:
         """
-        Маршрутизирует входящую команду (START или CANCEL).
+        Маршрутизирует входящую команду (START или CANCEL) с сохранением контекста оффсета.
         """
         cmd_type = envelope.type.upper()
 
         if cmd_type == CommandType.START.value:
-            await self._handle_start(envelope)
+            await self._handle_start(envelope, ctx)
         elif cmd_type == CommandType.CANCEL.value:
-            await self._handle_cancel(envelope)
+            await self._handle_cancel(envelope, ctx)
         else:
             print(f"[!] Получена неизвестная команда: '{cmd_type}' для задачи {envelope.job_id}")
+            if ctx is not None:
+                await self.transport.commit(ctx)
 
-    async def _handle_start(self, envelope: KafkaEnvelope) -> None:
+    async def _handle_start(self, envelope: KafkaEnvelope, ctx: Optional[Any] = None) -> None:
         """
         Обрабатывает команду запуска анализа START.
+        - Идемпотентность: повторная отправка готового результата или продолжение расчета.
+        - Устойчивость: сбой отправки running не оставляет задачу без вычисления (Issue 2).
+        - Ручной коммит оффсета строго после отправки результата (Issue 1).
         """
         job_id = envelope.job_id
         message_id = envelope.message_id
 
         # 1. Проверка идемпотентности сообщения
         if self.repository.is_message_processed(message_id):
-            print(f"[*] Сообщение {message_id} уже обработано ранее. Проверка наличия сохраненного результата.")
+            if job_id in self._active_tokens:
+                print(f"[*] Задача {job_id} уже выполняется в данный момент. Пропускаем дубликат.")
+                if ctx is not None:
+                    await self.transport.commit(ctx)
+                return
+
             saved_result = self.repository.get_saved_result(job_id)
             if saved_result:
-                # Повторно доставляем сохраненный RESULT
+                print(f"[*] Сообщение {message_id} уже обработано ранее. Повторная отправка сохраненного результата.")
                 res_envelope = KafkaEnvelope.from_dict(saved_result)
                 await self.producer.send_event(res_envelope)
-            return
+                if ctx is not None:
+                    await self.transport.commit(ctx)
+                return
+
+            print(f"[!] Сообщение {message_id} было получено ранее, но результат не был сохранен. Повторяем вычисления.")
 
         # 2. Проверка, не выполняется ли уже эта задача
         if job_id in self._active_tokens:
             print(f"[!] Задача {job_id} уже выполняется. Повторный запуск проигнорирован.")
+            if ctx is not None:
+                await self.transport.commit(ctx)
             return
-
-        # Фиксируем получение message_id
-        self.repository.mark_message_processed(message_id, job_id)
 
         # 3. Валидация входных данных команды START
         try:
             start_payload = StartCommandPayload.from_dict(envelope.payload)
         except ValueError as val_err:
+            self.repository.mark_message_processed(message_id, job_id)
             await self._emit_failed_result(
                 job_id=job_id,
                 code=ErrorCode.INVALID_PARAMETERS.value,
                 message=str(val_err),
             )
+            if ctx is not None:
+                await self.transport.commit(ctx)
             return
 
         try:
             start_payload.validate_transports()
         except ValueError as trans_err:
+            self.repository.mark_message_processed(message_id, job_id)
             await self._emit_failed_result(
                 job_id=job_id,
                 code=ErrorCode.UNSUPPORTED_TRANSPORT.value,
                 message=str(trans_err),
             )
+            if ctx is not None:
+                await self.transport.commit(ctx)
             return
 
-        # 4. Регистрация токена отмены и отправка статуса running
+        # 4. Регистрация токена отмены и фиксация message_id
         token = CancellationToken()
         self._active_tokens[job_id] = token
+        self.repository.mark_message_processed(message_id, job_id)
 
-        await self._emit_status(job_id=job_id, status=TaskStatus.RUNNING.value)
-        self.repository.save_job_state(job_id, status=TaskStatus.RUNNING.value)
+        # 5. Отправка промежуточного статуса running.
+        # Ошибка отправки промежуточного статуса не должна срывать запуск вычислений (Issue 2).
+        try:
+            await self._emit_status(job_id=job_id, status=TaskStatus.RUNNING.value)
+            self.repository.save_job_state(job_id, status=TaskStatus.RUNNING.value)
+        except Exception as status_err:
+            print(f"[!] Предупреждение: не удалось отправить статус RUNNING для {job_id}: {status_err}")
 
-        # 5. Запуск вычислений в фоновом режиме (не блокируя Kafka loop)
+        # 6. Запуск вычислений в фоновом режиме с передачей ctx для Manual Commit после завершения (Issue 1)
         task = asyncio.create_task(
             self._run_analysis_pipeline(
                 job_id=job_id,
                 payload=start_payload,
                 token=token,
+                ctx=ctx,
             )
         )
         self._active_tasks[job_id] = task
 
-    async def _handle_cancel(self, envelope: KafkaEnvelope) -> None:
+    async def _handle_cancel(self, envelope: KafkaEnvelope, ctx: Optional[Any] = None) -> None:
         """
         Обрабатывает команду отмены вычислений CANCEL.
         """
@@ -179,16 +205,22 @@ class AnalysisWorker:
             else:
                 # Если задача еще не стартовала, подтверждаем отмену
                 await self._emit_status(job_id=job_id, status=TaskStatus.CANCELED.value)
-                self.repository.save_job_state(job_id, status=TaskStatus.CANCELED.value)
+                self.repository.save_job_state(job_id=job_id, status=TaskStatus.CANCELED.value)
+
+        # Команда отмены обработана — подтверждаем её оффсет
+        if ctx is not None:
+            await self.transport.commit(ctx)
 
     async def _run_analysis_pipeline(
         self,
         job_id: str,
         payload: StartCommandPayload,
         token: CancellationToken,
+        ctx: Optional[Any] = None,
     ) -> None:
         """
         Фоновый цикл выполнения построения графа, расчета метрик и публикации RESULT.
+        Подтверждает оффсет сообщения (Manual Commit) строго после публикации финального результата.
         """
         try:
             west, south, east, north = payload.area.to_bounds()
@@ -230,6 +262,8 @@ class AnalysisWorker:
                     code = ErrorCode.INVALID_PARAMETERS.value
 
                 await self._emit_failed_result(job_id=job_id, code=code, message=err_msg)
+                if ctx is not None:
+                    await self.transport.commit(ctx)
                 return
 
             # Успешное построение графа — сериализуем в контракт Go и рассчитываем метрики
@@ -278,10 +312,16 @@ class AnalysisWorker:
             )
             print(f"[+] Задача {job_id} успешно завершена со статусом {result_payload.status}.")
 
+            # Manual Commit оффсета только после успешной отправки результата (Issue 1)
+            if ctx is not None:
+                await self.transport.commit(ctx)
+
         except TaskCancelledException:
             print(f"[*] Выполнение задачи {job_id} остановлено по сигналу отмены.")
             await self._emit_status(job_id=job_id, status=TaskStatus.CANCELED.value)
             self.repository.save_job_state(job_id=job_id, status=TaskStatus.CANCELED.value)
+            if ctx is not None:
+                await self.transport.commit(ctx)
 
         except Exception as unhandled_err:
             print(f"[-] Непредвиденная ошибка в задаче {job_id}: {unhandled_err}", file=sys.stderr)
@@ -290,6 +330,8 @@ class AnalysisWorker:
                 code=ErrorCode.INTERNAL_ERROR.value,
                 message=f"Внутренняя ошибка сервиса: {unhandled_err}",
             )
+            if ctx is not None:
+                await self.transport.commit(ctx)
 
         finally:
             self._active_tokens.pop(job_id, None)
@@ -404,4 +446,3 @@ def run_worker_cli():
         asyncio.run(run_worker_async(mock_kafka=args.mock_kafka))
     except KeyboardInterrupt:
         print("\n[+] Процесс завершен пользователем.")
-

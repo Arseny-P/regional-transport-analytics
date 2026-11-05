@@ -194,7 +194,7 @@ class TerritoryAnalysisService:
             snapped_nodes = facility_service.snap_to_road_network(
                 road_graph=road_graph, 
                 nodes=all_nodes,
-                max_snap_distance_m=request.max_snap_distance_m,
+                max_snap_distance_m=request.max_snap_distance_m if request.max_snap_distance_m is not None else 250.0,
             )
         except Exception as snap_err:
             return AnalysisResponse(

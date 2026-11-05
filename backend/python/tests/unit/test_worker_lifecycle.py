@@ -219,6 +219,158 @@ class TestWorkerLifecycle(unittest.IsolatedAsyncioTestCase):
         await self.worker.stop()
         worker_task.cancel()
 
+    async def test_manual_commit_strictly_after_result(self):
+        """Проверка Issue 1: оффсет коммитится строго после отправки RESULT."""
+        slow_service = DummyAnalysisService(delay_sec=0.3)
+        worker = AnalysisWorker(
+            transport=self.transport,
+            analysis_service=slow_service,
+        )
+        worker_task = asyncio.create_task(worker.start())
+
+        start_cmd = {
+            "message_id": "msg-commit-001",
+            "job_id": "job-commit",
+            "type": "START",
+            "payload": {
+                "area": {
+                    "first_point": {"latitude": 59.90, "longitude": 30.25},
+                    "second_point": {"latitude": 59.95, "longitude": 30.35},
+                },
+                "transports": ["road"],
+            },
+        }
+
+        await self.transport.put_test_command("analysis.commands", "job-commit", start_cmd)
+
+        # Сразу после запуска вычислений оффсет НЕ должен быть закоммичен
+        await asyncio.sleep(0.1)
+        committed = self.transport.get_committed_messages()
+        self.assertEqual(len(committed), 0, "Оффсет не должен коммититься во время выполнения задачи!")
+
+        # Ждем завершения расчета
+        await asyncio.sleep(0.4)
+        committed = self.transport.get_committed_messages()
+        self.assertEqual(len(committed), 1, "Оффсет должен быть закоммичен после завершения задачи")
+
+        results = self.transport.get_sent_messages("analysis.results")
+        self.assertTrue(any(v["type"] == EventType.RESULT.value for k, v in results))
+
+        await worker.stop()
+        worker_task.cancel()
+
+    async def test_resilience_to_running_status_emit_failure(self):
+        """Проверка Issue 2: сбой отправки running не оставляет задачу без вычисления."""
+        original_emit = self.worker._emit_status
+
+        async def faulty_emit_status(job_id: str, status: str):
+            if status == TaskStatus.RUNNING.value:
+                raise ConnectionError("Сбой сети при отправке промежуточного статуса running")
+            return await original_emit(job_id, status)
+
+        self.worker._emit_status = faulty_emit_status
+        worker_task = asyncio.create_task(self.worker.start())
+
+        start_cmd = {
+            "message_id": "msg-resilience-001",
+            "job_id": "job-resilience",
+            "type": "START",
+            "payload": {
+                "area": {
+                    "first_point": {"latitude": 59.90, "longitude": 30.25},
+                    "second_point": {"latitude": 59.95, "longitude": 30.35},
+                },
+                "transports": ["road"],
+            },
+        }
+
+        await self.transport.put_test_command("analysis.commands", "job-resilience", start_cmd)
+        await asyncio.sleep(0.3)
+
+        sent = self.transport.get_sent_messages("analysis.results")
+        # Статус RUNNING упал, но RESULT completed должен быть успешно отправлен
+        result_events = [v for k, v in sent if v["type"] == EventType.RESULT.value]
+        self.assertEqual(len(result_events), 1)
+        self.assertEqual(result_events[0]["payload"]["status"], TaskStatus.COMPLETED.value)
+
+        # Оффсет команды также подтвержден
+        self.assertGreaterEqual(len(self.transport.get_committed_messages()), 1)
+
+        await self.worker.stop()
+        worker_task.cancel()
+
+    async def test_retry_processed_message_without_saved_result(self):
+        """Проверка Issue 2: если message_id был зафиксирован, но результат не был сохранен (падение), повтор не теряется."""
+        # Имитируем падение: message_id есть в репозитории, но результат пуст
+        self.worker.repository.mark_message_processed("msg-lost-001", "job-lost-101")
+        self.assertIsNone(self.worker.repository.get_saved_result("job-lost-101"))
+
+        worker_task = asyncio.create_task(self.worker.start())
+
+        start_cmd = {
+            "message_id": "msg-lost-001",
+            "job_id": "job-lost-101",
+            "type": "START",
+            "payload": {
+                "area": {
+                    "first_point": {"latitude": 59.90, "longitude": 30.25},
+                    "second_point": {"latitude": 59.95, "longitude": 30.35},
+                },
+                "transports": ["road"],
+            },
+        }
+
+        # Отправляем повтор команды
+        await self.transport.put_test_command("analysis.commands", "job-lost-101", start_cmd)
+        await asyncio.sleep(0.3)
+
+        sent = self.transport.get_sent_messages("analysis.results")
+        result_events = [v for k, v in sent if v["type"] == EventType.RESULT.value]
+        self.assertEqual(len(result_events), 1, "Задача должна быть рассчитана, а не проигнорирована!")
+        self.assertEqual(result_events[0]["payload"]["status"], TaskStatus.COMPLETED.value)
+
+        await self.worker.stop()
+        worker_task.cancel()
+
+    async def test_poison_pill_does_not_crash_consumer(self):
+        """Проверка Issue 3: битый JSON подтверждается (commit) и консьюмер не падает, читая следующие команды."""
+        worker_task = asyncio.create_task(self.worker.start())
+
+        # 1. Отправляем "битый" JSON (Poison Pill) в виде байт
+        bad_json_bytes = b"BROKEN_JSON_NOT_A_VALID_STRUCTURE{{{"
+        await self.transport.put_test_command("analysis.commands", "corrupted-key", bad_json_bytes)
+
+        # 2. Сразу следом отправляем валидную команду START
+        valid_cmd = {
+            "message_id": "msg-after-poison-001",
+            "job_id": "job-after-poison",
+            "type": "START",
+            "payload": {
+                "area": {
+                    "first_point": {"latitude": 59.90, "longitude": 30.25},
+                    "second_point": {"latitude": 59.95, "longitude": 30.35},
+                },
+                "transports": ["road"],
+            },
+        }
+        await self.transport.put_test_command("analysis.commands", "job-after-poison", valid_cmd)
+
+        # Ждем обработки обоих сообщений
+        await asyncio.sleep(0.3)
+
+        # Проверяем, что оффсет битого сообщения был закоммичен, а также оффсет валидного
+        committed = self.transport.get_committed_messages()
+        self.assertGreaterEqual(len(committed), 2, "Должны быть закоммичены и битое сообщение, и выполненная команда")
+
+        # Проверяем, что валидная команда успешно выполнена (консьюмер не умер на битом JSON)
+        sent = self.transport.get_sent_messages("analysis.results")
+        result_events = [v for k, v in sent if v["job_id"] == "job-after-poison" and v["type"] == EventType.RESULT.value]
+        self.assertEqual(len(result_events), 1)
+        self.assertEqual(result_events[0]["payload"]["status"], TaskStatus.COMPLETED.value)
+
+        await self.worker.stop()
+        worker_task.cancel()
+
 
 if __name__ == "__main__":
     unittest.main()
