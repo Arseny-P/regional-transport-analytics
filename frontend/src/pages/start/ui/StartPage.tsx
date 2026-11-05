@@ -4,7 +4,6 @@ import styles from './StartPage.module.css';
 import { MapView } from '@/widgets/map-view';
 import { useNavigate } from 'react-router-dom';
 import { Button, Message } from '@/shared/ui';
-import { useState } from 'react';
 import { RegionBoundary, useRegion, useRegions } from '@/entities/region';
 
 
@@ -46,11 +45,10 @@ export function StartPage() {
 
       <label className={styles.regions}>
         Или выберите загруженный регион
-        <select
+        <select className={styles.select}
           value={regionId}
           onChange={(e) => setRegionId(e.target.value)}
           disabled={!regions?.length}
-          className={styles.select}
         >
           <option value="">
             {!regions ? 'Загрузка...' : regions.length ? 'Выберите регион' : 'Регионов пока нет'}
