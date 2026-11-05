@@ -2,6 +2,8 @@ from .schemas import (
     CommandType,
     EventType,
     TaskStatus,
+    ErrorCode,
+    SUPPORTED_TRANSPORTS,
     MapPoint,
     AreaPayload,
     StartCommandPayload,
@@ -17,11 +19,15 @@ from .schemas import (
 )
 from .consumer import CommandConsumer
 from .producer import EventProducer
+from .transport import KafkaTransportInterface, MockKafkaTransport, AioKafkaTransport
+from .worker import AnalysisWorker, run_worker_async, run_worker_cli
 
 __all__ = [
     "CommandType",
     "EventType",
     "TaskStatus",
+    "ErrorCode",
+    "SUPPORTED_TRANSPORTS",
     "MapPoint",
     "AreaPayload",
     "StartCommandPayload",
@@ -36,4 +42,10 @@ __all__ = [
     "KafkaEnvelope",
     "CommandConsumer",
     "EventProducer",
+    "KafkaTransportInterface",
+    "MockKafkaTransport",
+    "AioKafkaTransport",
+    "AnalysisWorker",
+    "run_worker_async",
+    "run_worker_cli",
 ]

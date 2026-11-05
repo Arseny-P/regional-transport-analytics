@@ -266,7 +266,7 @@ class AnalysisRequest:
     facilities: List[Dict[str, Any]] = field(default_factory=list)
     osm_facilities_limit: int = 100
     osm_tags: Optional[Dict[str, Any]] = None
-    max_snap_distance_m: Optional[float] = None
+    max_snap_distance_m: Optional[float] = 250.0
 
     knn: Optional[int] = None
     output_dir: str = "data"
@@ -303,7 +303,7 @@ class AnalysisRequest:
             facilities=data.get("facilities", []),
             osm_facilities_limit=int(data.get("osm_facilities_limit", 100)),
             osm_tags=data.get("osm_tags"),
-            max_snap_distance_m=float(data["max_snap_distance_m"]) if data.get("max_snap_distance_m") is not None else None,
+            max_snap_distance_m=float(data["max_snap_distance_m"]) if data.get("max_snap_distance_m") is not None else 250.0,
             knn=int(data["knn"]) if data.get("knn") is not None else None,
             output_dir=str(data.get("output_dir", "data")),
             output_alias=data.get("output_alias"),
@@ -327,6 +327,7 @@ class AnalysisResponse:
     geojson: Optional[Dict[str, Any]] = None
     warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
+    graph_object: Optional[Any] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

@@ -1,0 +1,15 @@
+{
+  "message_id": "77777777-7777-4777-8777-777777777777",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "RESULT",
+  "payload": {
+    "status": "failed",
+    "graph": null,
+    "metrics": [],
+    "error": {
+      "code": "osm_unavailable",
+      "message": "Зеркала OpenStreetMap Overpass API недоступны или превышен таймаут ответа"
+    }
+  }
+}
+

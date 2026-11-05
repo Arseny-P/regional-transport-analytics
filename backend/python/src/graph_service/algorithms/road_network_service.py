@@ -4,7 +4,7 @@ import networkx as nx
 import osmnx as ox
 
 from graph_service.domain.models import TerritoryBounds
-from graph_service.adapters.osm_client import execute_with_overpass_fallback
+from graph_service.http.osm_client import execute_with_overpass_fallback
 
 ox.settings.log_console = False
 ox.settings.use_cache = True
