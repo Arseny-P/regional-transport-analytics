@@ -48,23 +48,39 @@
   color: var(--text-secondary);
 }
 
-.regions {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  color: var(--text-primary);
+/* Контейнер карты и информационной карточки. */
+.MapContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.infoCard {
+  position: absolute; 
+  top: 35%;
+  left: 50%;
+  
+  z-index: 900;
+  transform: translateX(-45%);
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 800;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.3);
 }
 
 .select {
   width: 100%;
-  padding: 6px;
+  margin-top: 2px;
+  padding: 6px 4px;
   border: 1px solid var(--border);
   border-radius: 6px;
+  box-sizing: border-box;
+  margin-bottom: 4px;
   color: var(--text-primary);
-  background-color: var(--general-bg);
-}
-
-.error {
-  margin: 0;
-  color: var(--error-msg);
 }
