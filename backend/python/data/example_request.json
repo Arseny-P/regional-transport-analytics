@@ -1,0 +1,53 @@
+{
+  "territory_type": "bbox",
+  "bbox": {
+    "min_lat": 59.98,
+    "min_lon": 29.68,
+    "max_lat": 60.03,
+    "max_lon": 29.82
+  },
+  "facility_source": "user_defined",
+  "facilities": [
+    {
+      "id": "hub_merch_port",
+      "name": "Купеческая гавань (Портовый терминал)",
+      "type": "port",
+      "lat": 59.9885,
+      "lon": 29.7712
+    },
+    {
+      "id": "hub_marine_plant",
+      "name": "Кронштадтский морской завод",
+      "type": "industrial",
+      "lat": 59.9921,
+      "lon": 29.7785
+    },
+    {
+      "id": "hub_kad_logistics",
+      "name": "Логистический комплекс Кронштадтское шоссе (выезд на КАД)",
+      "type": "logistics_park",
+      "lat": 60.0094,
+      "lon": 29.7142
+    },
+    {
+      "id": "hub_west_terminal",
+      "name": "Западный грузовой терминал (Кронштадт-Запад)",
+      "type": "terminal",
+      "lat": 60.0152,
+      "lon": 29.6987
+    },
+    {
+      "id": "hub_sorting_center",
+      "name": "Сортировочный распределительный центр (Центральный)",
+      "type": "warehouse",
+      "lat": 59.9982,
+      "lon": 29.7654
+    }
+  ],
+  "knn": 2,
+  "output_dir": "data",
+  "output_alias": "kronshtadt_bbox_sample",
+  "save_artifacts": true,
+  "include_geojson_payload": true,
+  "refetch": false
+}

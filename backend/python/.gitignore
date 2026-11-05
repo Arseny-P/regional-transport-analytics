@@ -7,10 +7,17 @@ PM-research/
 
 CONTEXT.md
 PYTHON_GRAPH_SERVICE_STRUCTURE.md
+sprint2.md
+openapi.yaml
+arch.md
+kafka-go-python-contract.md
+.vscode/
 
 # Ignore generated heavy graphs, but keep sample test data
 data/*.graphml
 data/*.geojson
+data/*_response.json
+data/example_response.json
 data/kronshtadt_network.*
 data/central_district.*
 data/shushary_*

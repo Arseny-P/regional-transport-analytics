@@ -7,9 +7,7 @@ export function AppLayout() {
 
   return (
     <div className={styles.layout}>
-      <header className={styles.header}>
-        Анализ транспортной сети
-      </header>
+      <header className={styles.header}>Анализ транспортной сети</header>
       <div className={styles.body}>
         <aside className={styles.sidebar}>
           <div ref={setSidebarNode} />
@@ -19,10 +17,25 @@ export function AppLayout() {
         </main>
       </div>
       <footer className={styles.footer}>
-        <span>Карта © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors</span>
-        <a href="https://github.com/Arseny-P/regional-transport-analytics" target="_blank" rel="noopener noreferrer">Наш GitHub</a>
+        <span>
+          Карта ©{' '}
+          <a
+            href="https://www.openstreetmap.org/copyright"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            OpenStreetMap
+          </a>{' '}
+          contributors
+        </span>
+        <a
+          href="https://github.com/Arseny-P/regional-transport-analytics"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Наш GitHub
+        </a>
       </footer>
     </div>
   );
 }
-

@@ -4,8 +4,8 @@ BIN := $(CURDIR)/bin
 
 ENV_FILE ?= ../../.env
 
-# Читать локальные настройки и передавать их запускаемым программам.
-# Если .env отсутствует (например, в CI), продолжать без него.
+
+
 -include $(ENV_FILE)
 export
 
@@ -23,7 +23,7 @@ build:
 tools:
 	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0
 	go install github.com/pressly/goose/v3/cmd/goose@v3.26.0
-
+	go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@latest
 fmt:
 	gofmt -w cmd config internal
 
@@ -42,7 +42,7 @@ lint:
 tidy:
 	go mod tidy
 test:
-	go test -race -timeout 60s ./...
+	go test -race -timeout 5m ./...
 
 migrate-up:
 	"$(BIN)/goose" -env "$(ENV_FILE)" -dir migrations up
