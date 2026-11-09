@@ -81,6 +81,8 @@ services:
         condition: service_started
       minio:
         condition: service_healthy
+      graph-service:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/healthz"]
       interval: 5s
@@ -88,7 +90,30 @@ services:
       retries: 10
     stop_grace_period: 15s
 
+  graph-service:
+    build:
+      context: ./backend/python
+      dockerfile: Dockerfile
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+      KAFKA_GROUP_ID: graph-service-worker
+      KAFKA_COMMANDS_TOPIC: analysis.commands
+      KAFKA_RESULTS_TOPIC: analysis.results
+      DATA_DIR: /app/data
+      CACHE_DIR: /app/cache
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - graph_data:/app/data
+      - graph_cache:/app/cache
+    depends_on:
+      kafka:
+        condition: service_started
+    restart: unless-stopped
+    stop_grace_period: 15s
+
 volumes:
   postgres_data:
   kafka_data:
   minio_data:
+  graph_data:
+  graph_cache:

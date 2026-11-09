@@ -150,31 +150,63 @@ class AioKafkaTransport(KafkaTransportInterface):
     async def start(self) -> None:
         from aiokafka import AIOKafkaProducer, AIOKafkaConsumer
 
-        self._producer = AIOKafkaProducer(
-            bootstrap_servers=self.bootstrap_servers,
-            value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
-            key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else k,
-        )
-        await self._producer.start()
+        retries = 15
+        for attempt in range(1, retries + 1):
+            try:
+                self._producer = AIOKafkaProducer(
+                    bootstrap_servers=self.bootstrap_servers,
+                    value_serializer=lambda v: json.dumps(v, ensure_ascii=False).encode("utf-8"),
+                    key_serializer=lambda k: k.encode("utf-8") if isinstance(k, str) else k,
+                )
+                await self._producer.start()
 
-        # Важно: enable_auto_commit=False для гарантированной обработки (Issue 1)
-        # Не передаем value_deserializer с json.loads, чтобы битый JSON не завершал consumer (Issue 3)
-        self._consumer = AIOKafkaConsumer(
-            self.commands_topic,
-            bootstrap_servers=self.bootstrap_servers,
-            group_id=self.group_id,
-            auto_offset_reset="earliest",
-            enable_auto_commit=False,
-        )
-        await self._consumer.start()
-        self._running = True
+                # Важно: enable_auto_commit=False для гарантированной обработки (Issue 1)
+                # Не передаем value_deserializer с json.loads, чтобы битый JSON не завершал consumer (Issue 3)
+                self._consumer = AIOKafkaConsumer(
+                    self.commands_topic,
+                    bootstrap_servers=self.bootstrap_servers,
+                    group_id=self.group_id,
+                    auto_offset_reset="earliest",
+                    enable_auto_commit=False,
+                )
+                await self._consumer.start()
+                self._running = True
+                print(f"[+] Успешное подключение к Kafka ({self.bootstrap_servers})")
+                return
+            except Exception as conn_err:
+                if self._consumer:
+                    try:
+                        await self._consumer.stop()
+                    except Exception:
+                        pass
+                    self._consumer = None
+                if self._producer:
+                    try:
+                        await self._producer.stop()
+                    except Exception:
+                        pass
+                    self._producer = None
+
+                if attempt == retries:
+                    print(f"[-] Не удалось подключиться к Kafka ({self.bootstrap_servers}) после {retries} попыток: {conn_err}")
+                    raise
+                print(f"[*] Ожидание готовности брокера Kafka ({attempt}/{retries}): {conn_err}. Повтор через 2с...")
+                await asyncio.sleep(2)
 
     async def stop(self) -> None:
         self._running = False
         if self._consumer:
-            await self._consumer.stop()
+            try:
+                await self._consumer.stop()
+            except Exception:
+                pass
+            self._consumer = None
         if self._producer:
-            await self._producer.stop()
+            try:
+                await self._producer.stop()
+            except Exception:
+                pass
+            self._producer = None
 
     async def commit(self, message_context: Optional[Any] = None) -> None:
         """

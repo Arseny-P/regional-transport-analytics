@@ -50,6 +50,19 @@ python main.py --shushary --knn 3
 python main.py --input-json data/example_request.json --output-json data/example_response.json
 ```
 
+#### В. Запуск через Docker и Docker Compose
+Сервис полностью контейнеризован и интегрирован в общий `compose.yaml`:
+```bash
+# Сборка и запуск всего стека (Go Orchestrator, Python Worker, Kafka, Postgres, MinIO):
+docker compose up -d --build
+
+# Либо запуск только Kafka и Python воркера:
+docker compose up -d kafka graph-service
+
+# Просмотр логов воркера:
+docker compose logs -f graph-service
+```
+
 ---
 
 ## 🏗 Архитектура L3 (`src/graph_service/`)

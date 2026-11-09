@@ -71,6 +71,35 @@ class TestCliAndEntrypoints(unittest.TestCase):
         import graph_service.__main__
         self.assertIsNotNone(graph_service.__main__.run_worker_cli)
 
+    def test_dockerfile_and_compose_configuration(self):
+        backend_python_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+        root_dir = os.path.dirname(os.path.dirname(backend_python_dir))
+
+        dockerfile_path = os.path.join(backend_python_dir, "Dockerfile")
+        self.assertTrue(os.path.exists(dockerfile_path), "Dockerfile должен существовать в backend/python/")
+        with open(dockerfile_path, "r", encoding="utf-8") as f:
+            df_content = f.read()
+
+        self.assertIn("FROM python:3.11-slim", df_content)
+        self.assertIn("USER appuser", df_content)
+        self.assertIn("CMD [\"python\", \"-m\", \"graph_service\"]", df_content)
+        self.assertIn("KAFKA_BOOTSTRAP_SERVERS=\"kafka:19092\"", df_content)
+
+        dockerignore_path = os.path.join(backend_python_dir, ".dockerignore")
+        self.assertTrue(os.path.exists(dockerignore_path), ".dockerignore должен существовать в backend/python/")
+
+        compose_path = os.path.join(root_dir, "compose.yaml")
+        self.assertTrue(os.path.exists(compose_path), "compose.yaml должен существовать в корне проекта")
+        with open(compose_path, "r", encoding="utf-8") as f:
+            compose_content = f.read()
+
+        self.assertIn("graph-service:", compose_content)
+        self.assertIn("KAFKA_BOOTSTRAP_SERVERS: kafka:19092", compose_content)
+        self.assertIn("analysis.commands", compose_content)
+        self.assertIn("analysis.results", compose_content)
+        self.assertIn("graph_data:", compose_content)
+        self.assertIn("graph_cache:", compose_content)
+
 
 if __name__ == "__main__":
     unittest.main()
