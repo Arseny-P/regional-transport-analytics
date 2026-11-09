@@ -45,3 +45,4 @@ ENV KAFKA_BOOTSTRAP_SERVERS="kafka:19092" \
 
 # Точка входа по умолчанию: запуск фонового воркера Kafka
 CMD ["python", "-m", "graph_service"]
+

@@ -127,6 +127,10 @@ def main():
             asyncio.run(run_worker_async(mock_kafka=args.mock_kafka))
         except KeyboardInterrupt:
             print("\n[+] Процесс завершен пользователем.")
+            sys.exit(0)
+        except Exception as err:
+            print(f"\n[-] Аварийное завершение процесса: {err}", file=sys.stderr)
+            sys.exit(1)
         sys.exit(0)
 
     service = TerritoryAnalysisService(default_storage_dir=args.data_dir)

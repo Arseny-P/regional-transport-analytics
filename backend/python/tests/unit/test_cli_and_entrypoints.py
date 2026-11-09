@@ -101,6 +101,29 @@ class TestCliAndEntrypoints(unittest.TestCase):
         self.assertIn("graph_cache:", compose_content)
 
 
+class TestWorkerProcessCrashHandling(unittest.IsolatedAsyncioTestCase):
+    def test_run_worker_cli_exits_with_code_1_on_fatal_failure(self):
+        """Проверяет, что при фатальной ошибке run_worker_cli завершает процесс с кодом 1."""
+        from unittest.mock import patch
+        from graph_service.kafka.worker import run_worker_cli
+
+        with patch("sys.argv", ["main.py", "--mock-kafka"]):
+            with patch("graph_service.kafka.worker.run_worker_async", side_effect=ConnectionError("Kafka broker unreachable")):
+                with self.assertRaises(SystemExit) as cm:
+                    run_worker_cli()
+                self.assertEqual(cm.exception.code, 1)
+
+    async def test_run_worker_async_raises_on_fatal_worker_failure(self):
+        """Проверяет, что при сбое воркера run_worker_async не виснет в stop_event.wait(), а выбрасывает ошибку."""
+        from unittest.mock import patch
+        from graph_service.kafka.worker import run_worker_async
+        from graph_service.kafka.transport import MockKafkaTransport
+
+        with patch.object(MockKafkaTransport, "start", side_effect=ConnectionError("Kafka failed")):
+            with self.assertRaises(ConnectionError):
+                await run_worker_async(mock_kafka=True)
+
+
 if __name__ == "__main__":
     unittest.main()
 

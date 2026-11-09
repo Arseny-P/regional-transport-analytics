@@ -416,17 +416,38 @@ async def run_worker_async(mock_kafka: bool = False):
         except NotImplementedError:
             pass
 
+    stop_wait_task = asyncio.create_task(stop_event.wait())
     worker_task = asyncio.create_task(worker.start())
 
     try:
-        await stop_event.wait()
-    except (asyncio.CancelledError, KeyboardInterrupt):
-        pass
-    finally:
+        done, pending = await asyncio.wait(
+            [stop_wait_task, worker_task],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+
+        for t in pending:
+            t.cancel()
+
+        if worker_task in done:
+            exc = worker_task.exception()
+            if exc:
+                print(f"[-] Фатальная ошибка в работе воркера: {exc}", file=sys.stderr)
+                await worker.stop()
+                raise exc
+            elif not stop_event.is_set():
+                print("[-] Воркер неожиданно завершил работу без сигнала остановки.", file=sys.stderr)
+                await worker.stop()
+                raise RuntimeError("Воркер неожиданно завершил работу")
+
+        # Штатная остановка по сигналу stop_event (SIGINT/SIGTERM)
         print("[*] Остановка AnalysisWorker и отмена активных задач...")
         await worker.stop()
-        worker_task.cancel()
         print("[+] Воркер успешно остановлен.")
+
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        print("[*] Прерывание процесса воркера...")
+        await worker.stop()
+        raise
 
 
 def run_worker_cli():
@@ -446,3 +467,7 @@ def run_worker_cli():
         asyncio.run(run_worker_async(mock_kafka=args.mock_kafka))
     except KeyboardInterrupt:
         print("\n[+] Процесс завершен пользователем.")
+        sys.exit(0)
+    except Exception as err:
+        print(f"\n[-] Аварийное завершение процесса: {err}", file=sys.stderr)
+        sys.exit(1)
