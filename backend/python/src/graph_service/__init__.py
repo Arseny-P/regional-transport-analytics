@@ -7,6 +7,7 @@ from .domain import (
     AnalysisResponse,
 )
 from .application import TerritoryAnalysisService, BuildGraphUseCase
+from .db import JobRepository, MemoryJobRepository
 
 __all__ = [
     "config",
@@ -17,4 +18,6 @@ __all__ = [
     "AnalysisResponse",
     "TerritoryAnalysisService",
     "BuildGraphUseCase",
+    "JobRepository",
+    "MemoryJobRepository",
 ]

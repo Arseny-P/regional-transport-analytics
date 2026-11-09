@@ -66,21 +66,51 @@ class LogisticsGraphService:
     ) -> Dict[str, Any]:
         """
         Находит наилучший (кратчайший) маршрут среди пула кандидатов точек подключения.
-        Реализует исследовательский алгоритм find_best_route из ноутбука PM (п. 7.11).
+        Реализует сквозную минимизацию полной дистанции Door-to-Door (плечо_A + дорога + плечо_B).
         Дополнительно выполняет сквозное дотягивание маршрута до центроидов объектов (Last-Mile Access).
         """
+        import osmnx as ox
+
+        best_total_distance = float("inf")
         best_distance = float("inf")
+        best_snap_u = 0.0
+        best_snap_v = 0.0
         best_u = None
         best_v = None
 
         for u in start_nodes:
+            if u not in road_graph:
+                continue
+            u_lat = float(road_graph.nodes[u]["y"])
+            u_lon = float(road_graph.nodes[u]["x"])
+            snap_u = (
+                ox.distance.great_circle(origin_coords[1], origin_coords[0], u_lat, u_lon)
+                if origin_coords
+                else 0.0
+            )
+
             for v in end_nodes:
+                if v not in road_graph:
+                    continue
                 if u == v:
                     continue
+
+                v_lat = float(road_graph.nodes[v]["y"])
+                v_lon = float(road_graph.nodes[v]["x"])
+                snap_v = (
+                    ox.distance.great_circle(dest_coords[1], dest_coords[0], v_lat, v_lon)
+                    if dest_coords
+                    else 0.0
+                )
+
                 try:
                     d = nx.shortest_path_length(road_graph, source=u, target=v, weight="length")
-                    if d < best_distance:
+                    total_candidate = d + snap_u + snap_v
+                    if total_candidate < best_total_distance:
+                        best_total_distance = total_candidate
                         best_distance = d
+                        best_snap_u = snap_u
+                        best_snap_v = snap_v
                         best_u = u
                         best_v = v
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
@@ -106,27 +136,24 @@ class LogisticsGraphService:
         path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=best_u, target=best_v, weight="length")]
         route_geom = self._extract_route_geometry(road_graph, path_nodes)
 
-        import osmnx as ox
         u_lon = float(road_graph.nodes[best_u]["x"])
         u_lat = float(road_graph.nodes[best_u]["y"])
         v_lon = float(road_graph.nodes[best_v]["x"])
         v_lat = float(road_graph.nodes[best_v]["y"])
 
-        snap_origin_m = 0.0
-        snap_dest_m = 0.0
+        snap_origin_m = best_snap_u
+        snap_dest_m = best_snap_v
         door_to_door_coords = []
         origin_conn_wkt = None
         dest_conn_wkt = None
 
         if origin_coords:
-            snap_origin_m = ox.distance.great_circle(origin_coords[1], origin_coords[0], u_lat, u_lon)
             door_to_door_coords.append(origin_coords)
             origin_conn_wkt = LineString([origin_coords, (u_lon, u_lat)]).wkt
 
         door_to_door_coords.extend(list(route_geom.coords))
 
         if dest_coords:
-            snap_dest_m = ox.distance.great_circle(v_lat, v_lon, dest_coords[1], dest_coords[0])
             door_to_door_coords.append(dest_coords)
             dest_conn_wkt = LineString([(v_lon, v_lat), dest_coords]).wkt
 
@@ -448,12 +475,13 @@ class LogisticsGraphService:
                     })
 
             # Пунктирные коннекторы подъезда к дорожной сети (Access Legs / First-Last Mile)
-            conn_origin = data.get("conn_origin_ab_wkt")
-            if conn_origin and conn_origin not in added_connectors:
-                added_connectors.add(conn_origin)
+            # Направление A -> B
+            conn_origin_ab = data.get("conn_origin_ab_wkt")
+            if conn_origin_ab and conn_origin_ab not in added_connectors:
+                added_connectors.add(conn_origin_ab)
                 features.append({
                     "type": "Feature",
-                    "geometry": mapping(wkt.loads(conn_origin)),
+                    "geometry": mapping(wkt.loads(conn_origin_ab)),
                     "properties": {
                         "feature_type": "access_connector",
                         "connector_type": "entry_leg",
@@ -468,12 +496,12 @@ class LogisticsGraphService:
                     }
                 })
 
-            conn_dest = data.get("conn_dest_ab_wkt")
-            if conn_dest and conn_dest not in added_connectors:
-                added_connectors.add(conn_dest)
+            conn_dest_ab = data.get("conn_dest_ab_wkt")
+            if conn_dest_ab and conn_dest_ab not in added_connectors:
+                added_connectors.add(conn_dest_ab)
                 features.append({
                     "type": "Feature",
-                    "geometry": mapping(wkt.loads(conn_dest)),
+                    "geometry": mapping(wkt.loads(conn_dest_ab)),
                     "properties": {
                         "feature_type": "access_connector",
                         "connector_type": "exit_leg",
@@ -485,6 +513,47 @@ class LogisticsGraphService:
                         "stroke-dasharray": "4 4",
                         "is_dashed": True,
                         "title": f"Подъезд: Дорога → {data.get('node_b_name', v)}"
+                    }
+                })
+
+            # Направление B -> A
+            conn_origin_ba = data.get("conn_origin_ba_wkt")
+            if conn_origin_ba and conn_origin_ba not in added_connectors:
+                added_connectors.add(conn_origin_ba)
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(wkt.loads(conn_origin_ba)),
+                    "properties": {
+                        "feature_type": "access_connector",
+                        "connector_type": "entry_leg",
+                        "hub_id": v,
+                        "hub_name": data.get("node_b_name", v),
+                        "distance_m": data.get("snap_origin_ba_m", 0.0),
+                        "stroke": "#f59e0b",
+                        "stroke-width": 2,
+                        "stroke-dasharray": "4 4",
+                        "is_dashed": True,
+                        "title": f"Подъезд: {data.get('node_b_name', v)} → Дорога"
+                    }
+                })
+
+            conn_dest_ba = data.get("conn_dest_ba_wkt")
+            if conn_dest_ba and conn_dest_ba not in added_connectors:
+                added_connectors.add(conn_dest_ba)
+                features.append({
+                    "type": "Feature",
+                    "geometry": mapping(wkt.loads(conn_dest_ba)),
+                    "properties": {
+                        "feature_type": "access_connector",
+                        "connector_type": "exit_leg",
+                        "hub_id": u,
+                        "hub_name": data.get("node_a_name", u),
+                        "distance_m": data.get("snap_dest_ba_m", 0.0),
+                        "stroke": "#f59e0b",
+                        "stroke-width": 2,
+                        "stroke-dasharray": "4 4",
+                        "is_dashed": True,
+                        "title": f"Подъезд: Дорога → {data.get('node_a_name', u)}"
                     }
                 })
 

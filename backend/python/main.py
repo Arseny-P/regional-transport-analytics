@@ -74,8 +74,8 @@ def parse_args():
     parser.add_argument(
         "--max-snap-distance",
         type=float,
-        default=None,
-        help="Максимальное допустимое расстояние привязки объекта к дороге в метрах (по умолчанию: без ограничений)",
+        default=250.0,
+        help="Максимальное допустимое расстояние привязки объекта к дороге в метрах (по умолчанию: 250.0 м)",
     )
     parser.add_argument(
         "--refetch",
@@ -101,16 +101,43 @@ def parse_args():
         help="Путь для сохранения результата AnalysisResponse JSON",
     )
 
+    # 5. Режим фонового микросервиса (Kafka Worker — Спринт 3)
+    parser.add_argument(
+        "--worker",
+        action="store_true",
+        help="Запустить сервис в режиме фонового воркера Kafka",
+    )
+    parser.add_argument(
+        "--mock-kafka",
+        action="store_true",
+        help="Использовать MockKafkaTransport (для локальных оффлайн тестов воркера)",
+    )
+
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+
+    # СЦЕНАРИЙ 0: Запуск в режиме фонового Kafka воркера (Спринт 3)
+    if args.worker:
+        import asyncio
+        from graph_service.kafka import run_worker_async
+        try:
+            asyncio.run(run_worker_async(mock_kafka=args.mock_kafka))
+        except KeyboardInterrupt:
+            print("\n[+] Процесс завершен пользователем.")
+            sys.exit(0)
+        except Exception as err:
+            print(f"\n[-] Аварийное завершение процесса: {err}", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
+
     service = TerritoryAnalysisService(default_storage_dir=args.data_dir)
 
     print("=" * 65)
-    print("ТРАНСПОРТНО-ЛОГИСТИЧЕСКИЙ АНАЛИТИЧЕСКИЙ СЕРВИС (СПРИНТ 2)")
-    print("Модульная архитектура: Arbitrary Territory + MultiGraph + Go DTO")
+    print("ТРАНСПОРТНО-ЛОГИСТИЧЕСКИЙ АНАЛИТИЧЕСКИЙ СЕРВИС (СПРИНТ 2 & 3)")
+    print("Модульная архитектура: Arbitrary Territory + MultiGraph + Kafka")
     print("=" * 65)
 
     # СЦЕНАРИЙ А: Прямой вызов через контрактный JSON от Go-бэкенда

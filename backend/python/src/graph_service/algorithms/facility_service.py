@@ -15,7 +15,7 @@ from graph_service.domain.models import (
 )
 from graph_service.domain.errors import FacilityValidationError
 import geopandas as gpd
-from graph_service.adapters.osm_client import execute_with_overpass_fallback
+from graph_service.http.osm_client import execute_with_overpass_fallback
 
 
 class FacilityService:
@@ -654,7 +654,7 @@ class FacilityService:
                                 best_lat = float(road_graph.nodes[u_cand]["y"])
                                 best_lon = float(road_graph.nodes[u_cand]["x"])
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
-                                access_pool = [u_cand, v_cand]
+                                access_pool = [u_cand]
                                 split_succeeded = True
                             elif dist_to_v < 8.0:
                                 # Проекция находится в пределах 8 метров от перекрёстка v
@@ -662,7 +662,7 @@ class FacilityService:
                                 best_lat = float(road_graph.nodes[v_cand]["y"])
                                 best_lon = float(road_graph.nodes[v_cand]["x"])
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
-                                access_pool = [v_cand, u_cand]
+                                access_pool = [v_cand]
                                 split_succeeded = True
                             else:
                                 virtual_id = 9_000_000_000 + (idx + 1)
@@ -671,7 +671,7 @@ class FacilityService:
                                     best_lat = proj_lat
                                     best_lon = proj_lon
                                     best_dist = proj_dist_m
-                                    access_pool = [virtual_id, u_cand, v_cand]
+                                    access_pool = [virtual_id]
                                     split_succeeded = True
 
             # 2. Если врезка не удалась — резервный выбор из перекрёстков-кандидатов с защитой от тупиков
@@ -734,6 +734,8 @@ class FacilityService:
                     key=lambda x: (not x["is_transit"], x["dist"])
                 )
                 for c in remaining:
+                    if max_snap_distance_m is not None and c["dist"] > max_snap_distance_m:
+                        continue
                     if len(access_pool) >= 5:
                         break
                     access_pool.append(c["id"])
