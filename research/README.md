@@ -9,6 +9,7 @@
 | Ноутбук | Описание |
 |---|---|
 | [transport_logistics_graph_research.ipynb](notebooks/transport_logistics_graph_research.ipynb) | Исследование возможностей OSMnx и NetworkX, построение дорожного графа и графа логистических объектов, моделирование транспортных связей и визуализация маршрутов. |
+| [warehouse_selection_f.ipynb](notebooks/warehouse_selection_f.ipynb) | Отбор складов из OpenStreetMap, привязка к дорожной сети, поиск кратчайших маршрутов и проверка привязок на карте. |
 
 ## Используемые инструменты
 
