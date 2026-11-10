@@ -20,21 +20,14 @@ const STATUS_LABELS: Record<JobState, string> = {
 
 function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: ReactNode }) {
   const navigate = useNavigate();
+  // const [preview, setPreview] = useState<'warehouse' | 'intersection' | null>('intersection');
 
   const sidebarContent = (
     <>
       <h3 className={styles.title}>Результаты анализа</h3>
       {sidebar}
 
-      <NodeCard
-        node={{ id: '42', kind: 'intersection' }}
-        metrics={[
-          { id: 'degree', label: 'Степень вершины', value: 0 },
-          { id: 'importance', label: 'Структурная важность', value: null },
-        ]}
-        onClose={() => {}}
-      />
-
+     
       <Button className={styles.newAnalysisButton} onClick={() => navigate('/analysis')}>
         Новый анализ
       </Button>
@@ -53,9 +46,12 @@ function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const { status, result, requestError } = useAnalysisJob(jobId);
   const [metric] = useState('');
+  const [ selectedNodeId, setSelectedNodeId ] = useState<string | null>(null);
 
   const job = status ?? result;
   const graph = result?.graph;
+  const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
+  const degree = selectedNode?.attributes?.degree;
   const notFound = requestError instanceof ApiError && requestError.status === 404;
   const isFinal = !!job && isFinalState(job.status);
   const isWaiting = !notFound && !graph && !isFinal;
@@ -88,8 +84,6 @@ function JobResult({ jobId }: { jobId: string }) {
       {result?.metrics.length ? (
         <>
 
-        {/* <MetricSelect metrics={result.metrics} value={metric} onChange={setMetric} /> */}
-
         <table className={styles.metricsTable}>
           <thead>
             <tr>
@@ -105,6 +99,14 @@ function JobResult({ jobId }: { jobId: string }) {
           ))}
           </tbody>
         </table>
+
+         {selectedNode && (
+          <NodeCard node={{ id: selectedNode.id }} metrics={[
+            { id: 'degree', label: 'Степень вершины', value: typeof degree === 'number' ? degree : null },
+          ]}
+          onClose={() => setSelectedNodeId(null)}
+          />
+      )}
       </>
       ) : (
         <p className={styles.muted}>
@@ -120,7 +122,7 @@ function JobResult({ jobId }: { jobId: string }) {
 
   return (
     <ResultLayout sidebar={sidebar}>
-      <MapView>{graph && <GraphLayer graph={graph} colorBy={metric || undefined} />}</MapView>
+      <MapView>{graph && <GraphLayer graph={graph} colorBy={metric || undefined} onNodeHover={setSelectedNodeId} />}</MapView>
       {isWaiting && (
         <div className={styles.overlay}>
           <Message

@@ -12,9 +12,10 @@ const toLatLng = ([lng, lat]: Position): LatLngTuple => [lat, lng];
 interface GraphLayerProps {
   graph: Graph;
   colorBy?: string;
+  onNodeHover?: (nodeId: string) => void;
 }
 
-export function GraphLayer({ graph, colorBy }: GraphLayerProps) {
+export function GraphLayer({ graph, colorBy, onNodeHover }: GraphLayerProps) {
   const map = useMap();
 
   const nodePositions = useMemo(
@@ -57,6 +58,7 @@ export function GraphLayer({ graph, colorBy }: GraphLayerProps) {
             center={toLatLng(node.position)}
             radius={6}
             pathOptions={{ color, fillColor: color, fillOpacity: 0.9 }}
+            eventHandlers={{ mouseover: () => onNodeHover?.(node.id), }}
           >
             {typeof value === 'number' && <Tooltip>{`${colorBy}: ${value}`}</Tooltip>}
           </CircleMarker>

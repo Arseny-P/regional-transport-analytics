@@ -13,7 +13,7 @@ interface NodeMetric {
 interface NodeCardProps {
   node: {
     id: string;
-    kind: NodeKind;
+    kind?: NodeKind;
     name?: string;
     connectionStatus?: string;
   };
@@ -27,7 +27,7 @@ const KIND_LABELS: Record<NodeKind, string> = {
 };
 
 export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
-  const kindLabel = KIND_LABELS[node.kind];
+  const kindLabel = node.kind ? KIND_LABELS[node.kind] : 'Вершина графа';
   const title = node.name?.trim() || kindLabel;
 
   return (
