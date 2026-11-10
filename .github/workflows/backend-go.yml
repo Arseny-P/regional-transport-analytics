@@ -1,0 +1,60 @@
+name: Go backend
+
+on:
+  pull_request:
+    paths:
+      - "backend/orchestrator-service/**"
+      - ".github/workflows/backend-go.yml"
+      - "Makefile"
+      - "compose.yaml"
+      - ".env.example"
+  push:
+    branches: [main]
+    paths:
+      - "backend/orchestrator-service/**"
+      - ".github/workflows/backend-go.yml"
+      - "Makefile"
+      - "compose.yaml"
+      - ".env.example"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/orchestrator-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/orchestrator-service/go.mod
+          cache-dependency-path: backend/orchestrator-service/go.sum
+      - name: Check formatting
+        run: make fmt-check
+      - name: Go vet
+        run: make vet
+      - name: Install tools
+        run: make tools
+      - name: Go lint
+        run: make lint
+      - name: Build Go service
+        run: make build
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend/orchestrator-service
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: backend/orchestrator-service/go.mod
+          cache-dependency-path: backend/orchestrator-service/go.sum
+      - name: Go tests
+        run: make test

@@ -1,0 +1,86 @@
+/* Содержимое боковой панели: заголовок, описание, зона загрузки и подсказка. */
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Заголовок «Загрузите регион». */
+.title {
+  margin: 0;
+  font-size: 22px;
+  color: #243746;
+}
+
+/* Описание назначения сервиса под заголовком. */
+.description {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+/* Визуальная зона загрузки: приглашение перетащить файл и кнопка.
+   CSS задаёт только оформление; обработка файла реализуется отдельно в TSX/логике фичи. */
+.uploadZone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+
+  padding: 32px 20px;
+  border: 1px double var(--border);
+  border-radius: 0px;
+  background-color: var(--second-bg);
+  color: #243746;
+  text-align: center;
+}
+
+/* Убирает стандартные отступы только у абзацев внутри зоны загрузки. */
+.uploadZone p {
+  margin: 0;
+}
+
+/* Подсказка о том, что файл должен содержать границу региона. */
+.hint {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Контейнер карты и информационной карточки. */
+.MapContainer {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.infoCard {
+  position: absolute; 
+  top: 35%;
+  left: 50%;
+  
+  z-index: 900;
+  transform: translateX(-45%);
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 800;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.3);
+}
+
+.select {
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-sizing: border-box;
+  margin-bottom: 4px;
+  color: var(--text-primary);
+}

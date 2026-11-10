@@ -1,0 +1,19 @@
+app:
+  app_name: orchestrator
+  log_level: "DEBUG"
+
+http:
+  address: ":8080"
+  timeout: 30s
+  shutdown_timeout: 10s
+
+postgres_db:
+  dsn: ""
+
+minio_storage:
+  endpoint: localhost:9000
+  access_key: ""
+  secret_key: ""
+
+kafka_client:
+  address: localhost:9092

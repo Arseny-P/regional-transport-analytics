@@ -1,0 +1,25 @@
+.button {
+  padding: 12px 20px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+
+  background-color: #147d78;
+  color: #ffffff;
+
+  font: inherit;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  background-color: #10635f;
+}
+
+.button:focus-visible {
+  outline: 2px solid #d8e1e6;
+  outline-offset: 3px;
+}
+
+.button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

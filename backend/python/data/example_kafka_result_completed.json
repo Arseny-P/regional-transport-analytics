@@ -1,0 +1,117 @@
+{
+  "message_id": "55555555-5555-4555-8555-555555555555",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "RESULT",
+  "payload": {
+    "status": "completed",
+    "graph": {
+      "nodes": [
+        {
+          "id": "hub_1",
+          "position": [
+            30.25,
+            59.90
+          ],
+          "attributes": {
+            "name": "Складской терминал А",
+            "object_type": "warehouse"
+          }
+        },
+        {
+          "id": "hub_2",
+          "position": [
+            30.35,
+            59.95
+          ],
+          "attributes": {
+            "name": "Логистический хаб Б",
+            "object_type": "terminal"
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_hub_1_hub_2_road_1",
+          "source": "hub_1",
+          "target": "hub_2",
+          "geometry": [
+            [
+              30.25,
+              59.90
+            ],
+            [
+              30.30,
+              59.92
+            ],
+            [
+              30.35,
+              59.95
+            ]
+          ],
+          "attributes": {
+            "transport_mode": "road",
+            "route_status_ab": "found",
+            "route_status_ba": "found",
+            "total_distance_ab_m": 7500.0,
+            "total_distance_ba_m": 7500.0
+          }
+        }
+      ]
+    },
+    "metrics": [
+      {
+        "name": "vertex_count",
+        "value": 2.0
+      },
+      {
+        "name": "edge_count",
+        "value": 1.0
+      },
+      {
+        "name": "connected_components_count",
+        "value": 1.0
+      },
+      {
+        "name": "isolated_nodes_count",
+        "value": 0.0
+      },
+      {
+        "name": "isolated_nodes_ratio",
+        "value": 0.0
+      },
+      {
+        "name": "beta_index",
+        "value": 0.5
+      },
+      {
+        "name": "alpha_index",
+        "value": 0.0
+      },
+      {
+        "name": "gamma_index",
+        "value": 0.0
+      },
+      {
+        "name": "avg_degree",
+        "value": 1.0
+      },
+      {
+        "name": "network_density",
+        "value": 1.0
+      },
+      {
+        "name": "avg_edge_distance_km",
+        "value": 7.5
+      },
+      {
+        "name": "max_edge_distance_km",
+        "value": 7.5
+      },
+      {
+        "name": "diameter_km",
+        "value": 7.5
+      }
+    ]
+  }
+}
+
