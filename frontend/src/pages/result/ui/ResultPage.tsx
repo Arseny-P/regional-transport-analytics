@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 // import { MetricSelect } from '@/features/select-metric';
-import { GraphLayer, isFinalState, METRIC_LABELS, useAnalysisJob, type JobState } from '@/entities/analysis';
+import { GraphLayer, isFinalState, METRIC_LABELS, useAnalysisJob, type JobState, NodeCard } from '@/entities/analysis';
 import { ApiError } from '@/shared/api';
 import styles from './ResultPage.module.css';
 import { Button, Message, Spinner } from '@/shared/ui';
+
 
 const STATUS_LABELS: Record<JobState, string> = {
   queued: 'В очереди',
@@ -24,6 +25,16 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
     <>
       <h3 className={styles.title}>Результаты анализа</h3>
       {sidebar}
+
+      <NodeCard
+        node={{ id: '42', kind: 'intersection' }}
+        metrics={[
+          { id: 'degree', label: 'Степень вершины', value: 0 },
+          { id: 'importance', label: 'Структурная важность', value: null },
+        ]}
+        onClose={() => {}}
+      />
+
       <Button className={styles.newAnalysisButton} onClick={() => navigate('/analysis')}>
         Новый анализ
       </Button>
