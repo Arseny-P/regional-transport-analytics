@@ -77,3 +77,26 @@
   display: block;
   margin: 32px auto 0;
 }
+
+/* Таблица общих показателей графа. */
+.metricsTable {
+  width: 100%;
+  margin-top: 16px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.metricsTable th,
+.metricsTable td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+
+.metricsTable thead {
+  background-color: var(--second-bg);
+}
+
+.metricsTable tr > :last-child {
+  text-align: right;
+}

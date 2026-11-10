@@ -2,8 +2,8 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
-import { MetricSelect } from '@/features/select-metric';
-import { GraphLayer, isFinalState, useAnalysisJob, type JobState } from '@/entities/analysis';
+// import { MetricSelect } from '@/features/select-metric';
+import { GraphLayer, isFinalState, METRIC_LABELS, useAnalysisJob, type JobState } from '@/entities/analysis';
 import { ApiError } from '@/shared/api';
 import styles from './ResultPage.module.css';
 import { Button, Message, Spinner } from '@/shared/ui';
@@ -41,7 +41,7 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const { status, result, requestError } = useAnalysisJob(jobId);
-  const [metric, setMetric] = useState('');
+  const [metric] = useState('');
 
   const job = status ?? result;
   const graph = result?.graph;
@@ -73,9 +73,28 @@ function JobResult({ jobId }: { jobId: string }) {
       {requestError && <p className={styles.warning}>Нет связи с сервером, повторяем запрос...</p>}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
 
-      <h4>Метрика графа:</h4>
+      <h4>Простые метрики графа:</h4>
       {result?.metrics.length ? (
-        <MetricSelect metrics={result.metrics} value={metric} onChange={setMetric} />
+        <>
+
+        {/* <MetricSelect metrics={result.metrics} value={metric} onChange={setMetric} /> */}
+
+        <table className={styles.metricsTable}>
+          <thead>
+            <tr>
+              <th scope="col">Показатель</th>
+              <th scope="col">Значение</th>
+            </tr>
+          </thead>
+          <tbody> {result.metrics.map(({ name, value }) => (
+            <tr key={name}> 
+              <th scope="row">{METRIC_LABELS[name] ?? name}</th>
+              <td>{value ?? 'Не рассчитано'}</td>
+            </tr>
+          ))}
+          </tbody>
+        </table>
+      </>
       ) : (
         <p className={styles.muted}>
           {isFinal
