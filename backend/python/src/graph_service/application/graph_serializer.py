@@ -1,4 +1,5 @@
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Set, Tuple
+import ast
 import networkx as nx
 from shapely import wkt
 from shapely.geometry.base import BaseGeometry
@@ -14,6 +15,118 @@ class GraphSerializer:
     """
 
     @classmethod
+    def compute_physical_segment_ids(
+        cls, graph: Union[nx.MultiGraph, nx.MultiDiGraph, nx.Graph]
+    ) -> Dict[Tuple[Any, Any, Any], str]:
+        """
+        Сопоставляет направленные рёбра MultiDiGraph с физическими дорожными участками
+        и присваивает устойчивые segment_id.
+
+        У двух направлений одного физического участка (u -> v и v -> u) segment_id одинаковый,
+        даже если ключи k в MultiDiGraph не совпадают (например, k=0 в одну сторону и k=1 в другую).
+        У параллельных физических участков между теми же узлами segment_id различны.
+        Подъездные коннекторы (edge_type == 'access_connector') исключаются.
+        """
+        def _get_osmid_set(d: Dict[str, Any]) -> Set[str]:
+            raw = d.get("osmid")
+            if raw is None:
+                return set()
+            if isinstance(raw, list):
+                return {str(x) for x in raw}
+            if isinstance(raw, str) and raw.startswith("["):
+                try:
+                    parsed = ast.literal_eval(raw)
+                    if isinstance(parsed, list):
+                        return {str(x) for x in parsed}
+                except Exception:
+                    pass
+            return {str(raw)}
+
+        # 1. Группируем дорожные рёбра по неупорядоченной паре узлов (u_min, u_max)
+        node_pairs: Dict[Tuple[str, str], List[Tuple[Any, Any, Any, Dict[str, Any]]]] = {}
+        for u, v, k, d in graph.edges(keys=True, data=True):
+            if d.get("edge_type") == "access_connector":
+                continue
+            u_str, v_str = str(u), str(v)
+            if u_str == v_str:
+                continue
+            pair = tuple(sorted([u_str, v_str]))
+            node_pairs.setdefault(pair, []).append((u, v, k, d))
+
+        edge_to_seg: Dict[Tuple[Any, Any, Any], str] = {}
+
+        # 2. Для каждой пары узлов формируем физические сегменты (жадное сопоставление 1-к-1)
+        for (u_min, u_max), edge_list in node_pairs.items():
+            fwd = [(u, v, k, d) for u, v, k, d in edge_list if str(u) == u_min]
+            rev = [(u, v, k, d) for u, v, k, d in edge_list if str(u) == u_max]
+
+            unmatched_rev = list(rev)
+            segments: List[List[Tuple[Any, Any, Any]]] = []
+
+            for f_u, f_v, f_k, f_d in fwd:
+                f_osms = _get_osmid_set(f_d)
+                f_len = float(f_d.get("length", 0.0) or f_d.get("length_m", 0.0))
+                best_match_idx = None
+                best_score = -1.0
+
+                if not f_d.get("oneway", False):
+                    for r_idx, (r_u, r_v, r_k, r_d) in enumerate(unmatched_rev):
+                        if r_d.get("oneway", False):
+                            continue
+                        r_osms = _get_osmid_set(r_d)
+                        r_len = float(r_d.get("length", 0.0) or r_d.get("length_m", 0.0))
+
+                        score = 0.0
+                        # Совпадение OSM ID — признак принадлежности к одному OSM way
+                        if f_osms and r_osms and (f_osms & r_osms):
+                            score += 1000.0
+
+                        # Совпадение длины
+                        if f_len > 0.0 and r_len > 0.0:
+                            diff_rel = abs(f_len - r_len) / max(f_len, r_len)
+                            if diff_rel < 0.05:
+                                score += 100.0
+                            elif diff_rel < 0.25:
+                                score += 40.0
+                        elif len(fwd) == 1 and len(rev) == 1:
+                            score += 500.0
+
+                        if score > best_score and score >= 40.0:
+                            best_score = score
+                            best_match_idx = r_idx
+
+                if best_match_idx is not None:
+                    matched_r = unmatched_rev.pop(best_match_idx)
+                    segments.append([(f_u, f_v, f_k), (matched_r[0], matched_r[1], matched_r[2])])
+                else:
+                    segments.append([(f_u, f_v, f_k)])
+
+            # Оставшиеся обратные рёбра (односторонние или без пары)
+            for r_u, r_v, r_k, r_d in unmatched_rev:
+                segments.append([(r_u, r_v, r_k)])
+
+            # 3. Детерминированная сортировка сегментов для стабильности segment_id
+            def seg_sort_key(seg_edges):
+                sort_items = []
+                for e_u, e_v, e_k in seg_edges:
+                    d = graph[e_u][e_v][e_k]
+                    osms = _get_osmid_set(d)
+                    min_osm = min(osms) if osms else ""
+                    length_val = float(d.get("length", 0.0) or d.get("length_m", 0.0))
+                    sort_items.append((min_osm, length_val, str(e_u), str(e_v), str(e_k)))
+                return sorted(sort_items)
+
+            segments.sort(key=seg_sort_key)
+
+            # 4. Присвоение segment_id
+            for idx, seg_edges in enumerate(segments):
+                seg_id = f"seg_{u_min}_{u_max}" if len(segments) == 1 else f"seg_{u_min}_{u_max}_{idx}"
+                for e_u, e_v, e_k in seg_edges:
+                    edge_to_seg[(e_u, e_v, e_k)] = seg_id
+
+        return edge_to_seg
+
+    @classmethod
     def serialize(cls, log_graph: Union[nx.MultiGraph, nx.MultiDiGraph, nx.Graph]) -> GraphPayload:
         """
         Преобразует граф сети в GraphPayload:
@@ -21,9 +134,13 @@ class GraphSerializer:
         - Атрибуты вершин: object_type ("warehouse", "intersection", "road_node"), name, etc.
         - Геометрия рёбер: [[lon, lat], ...] вдоль фактической геометрии дорожных сегментов/коннекторов.
         - Атрибуты рёбер: edge_type ("road" / "access_connector"), length_m, routes_count, etc.
+        - segment_id: физический ID дорожного участка (одинаков для u->v и v->u).
         """
         nodes: List[NodePayload] = []
         edges: List[EdgePayload] = []
+
+        # 0. Предварительно вычисляем сопоставление физических сегментов для дорожных рёбер
+        seg_id_map = cls.compute_physical_segment_ids(log_graph)
 
         # 1. Сериализация вершин
         for node_id, data in log_graph.nodes(data=True):
@@ -143,11 +260,8 @@ class GraphSerializer:
             # segment_id: у двух направлений одного физического участка дорог значение одинаковое.
             # У access_connector поле отсутствует.
             segment_id = data.get("segment_id")
-            if not segment_id and data.get("edge_type") == "road":
-                u_str, v_str = str(u), str(v)
-                sorted_ends = sorted([u_str, v_str])
-                k_suffix = f"_{k}" if k not in (0, "0", None) else ""
-                segment_id = f"seg_{sorted_ends[0]}_{sorted_ends[1]}{k_suffix}"
+            if not segment_id and data.get("edge_type") != "access_connector":
+                segment_id = seg_id_map.get((u, v, k))
             elif data.get("edge_type") == "access_connector":
                 segment_id = None
 

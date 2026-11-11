@@ -829,6 +829,9 @@ class LogisticsGraphService:
             )
 
         # 6. Добавляем дорожные рёбра (уникальные направленные сегменты)
+        from graph_service.application.graph_serializer import GraphSerializer
+        road_seg_ids = GraphSerializer.compute_physical_segment_ids(road_graph)
+
         for (u, v, k), usage in road_segment_usage.items():
             if not road_graph.has_edge(u, v, k):
                 continue
@@ -848,8 +851,7 @@ class LogisticsGraphService:
             edge_id = f"road_{u}_{v}_{k}"
             u_str, v_str = str(u), str(v)
             sorted_ends = sorted([u_str, v_str])
-            k_suffix = f"_{k}" if k not in (0, "0", None) else ""
-            segment_id = f"seg_{sorted_ends[0]}_{sorted_ends[1]}{k_suffix}"
+            segment_id = road_seg_ids.get((u, v, k)) or f"seg_{sorted_ends[0]}_{sorted_ends[1]}"
 
             route_graph.add_edge(
                 str(u),
@@ -867,6 +869,7 @@ class LogisticsGraphService:
                 name=str(edge_data.get("name", "")),
                 maxspeed=str(edge_data.get("maxspeed", "")),
                 oneway=bool(edge_data.get("oneway", False)),
+                osmid=edge_data.get("osmid"),
                 transport_mode="road",
             )
 

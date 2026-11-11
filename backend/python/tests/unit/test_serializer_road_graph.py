@@ -153,6 +153,39 @@ class TestSerializerRoadGraph(unittest.TestCase):
         self.assertEqual(edge_dict["road_B_A_0"].segment_id, "seg_A_B")
         self.assertEqual(edge_dict["road_A_B_0"].segment_id, edge_dict["road_B_A_0"].segment_id)
 
+    def test_parallel_edges_mismatched_keys_and_osmid_segment_ids(self):
+        """
+        Проверяет сценарий из ревью: в MultiDiGraph ключи k обратных направлений не обязаны совпадать.
+        Например:
+        - Дорога A (100м, osmid 111): A -> B имеет k=0, а B -> A имеет k=1.
+        - Дорога B (200м, osmid 222): A -> B имеет k=1, а B -> A имеет k=0.
+        
+        Оба направления дороги A должны получить одинаковый segment_id.
+        Оба направления дороги B должны получить одинаковый segment_id.
+        При этом дороги A и B должны получить разные segment_id (без ошибочной склейки).
+        """
+        graph = nx.MultiDiGraph()
+        graph.add_node("1", x=30.0, y=60.0)
+        graph.add_node("2", x=30.1, y=60.1)
+
+        # Дорога A (100м)
+        graph.add_edge("1", "2", key=0, edge_type="road", id="road_A_fwd", length_m=100.0, osmid=111)
+        graph.add_edge("2", "1", key=1, edge_type="road", id="road_A_rev", length_m=100.0, osmid=111)
+
+        # Дорога B (200м)
+        graph.add_edge("1", "2", key=1, edge_type="road", id="road_B_fwd", length_m=200.0, osmid=222)
+        graph.add_edge("2", "1", key=0, edge_type="road", id="road_B_rev", length_m=200.0, osmid=222)
+
+        payload = GraphSerializer.serialize(graph)
+        edge_dict = {e.id: e for e in payload.edges}
+
+        # Направления дороги A совпадают между собой
+        self.assertEqual(edge_dict["road_A_fwd"].segment_id, edge_dict["road_A_rev"].segment_id)
+        # Направления дороги B совпадают между собой
+        self.assertEqual(edge_dict["road_B_fwd"].segment_id, edge_dict["road_B_rev"].segment_id)
+        # Дорога A и Дорога B не склеиваются ошибочно
+        self.assertNotEqual(edge_dict["road_A_fwd"].segment_id, edge_dict["road_B_fwd"].segment_id)
+
 
 if __name__ == "__main__":
     unittest.main()

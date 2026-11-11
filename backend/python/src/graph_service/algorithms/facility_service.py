@@ -806,7 +806,48 @@ class FacilityService:
 
         # 3. Обратные ребра (если улица двусторонняя, v -> u)
         if road_graph.has_edge(v, u):
-            for rev_k in list(road_graph[v][u].keys()):
+            rev_candidates = list(road_graph[v][u].keys())
+            matched_rev_k = None
+            if len(rev_candidates) == 1:
+                matched_rev_k = rev_candidates[0]
+            else:
+                # Находим соответствующее встречное ребро по osmid или сходству длины
+                fwd_osmids = set()
+                f_raw = fwd_data.get("osmid")
+                if f_raw is not None:
+                    if isinstance(f_raw, list):
+                        fwd_osmids = {str(x) for x in f_raw}
+                    else:
+                        fwd_osmids = {str(f_raw)}
+
+                best_score = -1.0
+                for c_k in rev_candidates:
+                    c_data = road_graph[v][u][c_k]
+                    if c_data.get("oneway", False):
+                        continue
+                    c_osmids = set()
+                    c_raw = c_data.get("osmid")
+                    if c_raw is not None:
+                        if isinstance(c_raw, list):
+                            c_osmids = {str(x) for x in c_raw}
+                        else:
+                            c_osmids = {str(c_raw)}
+                    score = 0.0
+                    if fwd_osmids and c_osmids and (fwd_osmids & c_osmids):
+                        score += 1000.0
+                    c_len = float(c_data.get("length", 0.0))
+                    if orig_len > 0.0 and c_len > 0.0:
+                        diff = abs(orig_len - c_len) / max(orig_len, c_len)
+                        if diff < 0.05:
+                            score += 100.0
+                        elif diff < 0.25:
+                            score += 40.0
+                    if score > best_score:
+                        best_score = score
+                        matched_rev_k = c_k
+
+            if matched_rev_k is not None and not road_graph[v][u][matched_rev_k].get("oneway", False):
+                rev_k = matched_rev_k
                 rev_data = dict(road_graph[v][u][rev_k])
                 rev_geom = rev_data.get("geometry")
                 if rev_geom is not None and isinstance(rev_geom, LineString):
