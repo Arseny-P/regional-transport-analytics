@@ -325,14 +325,19 @@ class TerritoryAnalysisService:
             warnings.append("Ни один маршрут между объектами не был найден в графе дорог.")
 
         elapsed = round(time.time() - start_time, 2)
+        snap_summary = facility_service.get_snap_summary(snapped_nodes)
 
         summary_data = {
             "total_road_nodes": len(road_graph.nodes),
             "total_road_edges": len(road_graph.edges),
             "total_hubs": len(snapped_nodes),
+            "connected_hubs_count": snap_summary.get("connected_count", 0),
+            "isolated_hubs_count": len(isolated_hubs),
+            "unique_snap_road_nodes": snap_summary.get("unique_primary_nodes", 0),
+            "avg_snap_distance_m": snap_summary.get("avg_snap_distance_m", 0.0),
+            "max_snap_distance_m": snap_summary.get("max_snap_distance_m", 0.0),
             "total_connections": len(connections_data),
             "connected_pairs_count": connected_pairs_count,
-            "isolated_hubs_count": len(isolated_hubs),
             "avg_route_distance_km": graph_summary.get("avg_route_distance_km", 0.0),
             "route_graph_nodes": road_subgraph_summary["total_nodes"],
             "route_graph_edges": road_subgraph_summary["total_edges"],
