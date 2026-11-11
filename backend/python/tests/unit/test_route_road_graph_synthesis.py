@@ -141,6 +141,53 @@ class TestRouteRoadGraphSynthesis(unittest.TestCase):
         self.assertEqual(summary["isolated_warehouses_count"], 1)
         self.assertEqual(summary["intersections_count"], 1)  # узел 2
 
+    def test_large_osm_id_intersection_classification_and_virtual_node(self):
+        """
+        Проверяет корректность классификации узлов с большими ID:
+        - Реальный узел OSM с ID >= 9_000_000_000 (например, 10_844_030_702) и street_count >= 3
+          НЕ должен превращаться в road_node, а должен оставаться intersection!
+        - Виртуальный узел врезки (is_virtual=True) должен классифицироваться как road_node.
+        """
+        road_graph = nx.MultiDiGraph()
+        road_graph.graph["crs"] = "epsg:4326"
+
+        real_large_id = 10_844_030_702  # Реальный OSM ID > 10 млрд
+        virt_id = 9_000_000_001
+
+        # Реальный перекресток с большим ID
+        road_graph.add_node(real_large_id, x=30.01, y=60.01, street_count=4)
+        # Виртуальный врезанный узел
+        road_graph.add_node(virt_id, x=30.02, y=60.02, street_count=2, is_virtual=True)
+        # Обычный дорожный узел
+        road_graph.add_node(100, x=30.00, y=60.00, street_count=2)
+
+        # Соединяем ребрами
+        road_graph.add_edge(100, real_large_id, key=0, length=200.0)
+        road_graph.add_edge(real_large_id, virt_id, key=0, length=200.0)
+
+        w1 = LogisticsNode(
+            id="W1", name="Склад 1", object_type="warehouse",
+            latitude=60.00, longitude=30.00,
+            nearest_osm_node=100, access_nodes=[100], snap_distance_m=10.0,
+        )
+        w2 = LogisticsNode(
+            id="W2", name="Склад 2", object_type="warehouse",
+            latitude=60.02, longitude=30.02,
+            nearest_osm_node=virt_id, access_nodes=[virt_id], snap_distance_m=10.0,
+        )
+
+        route_graph = self.service.build_route_road_graph(
+            road_graph=road_graph,
+            nodes=[w1, w2],
+        )
+
+        # Проверяем классификацию
+        self.assertIn(str(real_large_id), route_graph.nodes)
+        self.assertEqual(route_graph.nodes[str(real_large_id)]["object_type"], "intersection")
+
+        self.assertIn(str(virt_id), route_graph.nodes)
+        self.assertEqual(route_graph.nodes[str(virt_id)]["object_type"], "road_node")
+
 
 if __name__ == "__main__":
     unittest.main()

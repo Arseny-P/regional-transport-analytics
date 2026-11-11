@@ -60,6 +60,39 @@ class TestMetricsRoadGraph(unittest.TestCase):
         self.assertEqual(metric_map["found_routes_count"], 2.0)
         self.assertAlmostEqual(metric_map["found_routes_ratio"], 2.0 / 3.0, places=3)
 
+    def test_metrics_large_graph_diameter_without_oom(self):
+        """
+        Проверяет расчёт диаметра для большого дорожного графа (600 узлов):
+        - Multi-sweep эвристика отрабатывает мгновенно (< 0.2с) без исчерпания памяти
+        - Возвращает корректный диаметр > 0 км
+        """
+        import time
+
+        route_graph = nx.MultiDiGraph()
+        route_graph.graph["crs"] = "epsg:4326"
+
+        # Линейная цепь из 600 узлов (V > 500)
+        n_nodes = 600
+        for i in range(n_nodes):
+            route_graph.add_node(str(i), x=30.0 + i * 0.001, y=60.0, object_type="road_node")
+            if i > 0:
+                route_graph.add_edge(str(i - 1), str(i), key=0, edge_type="road", length_m=100.0)
+                route_graph.add_edge(str(i), str(i - 1), key=0, edge_type="road", length_m=100.0)
+
+        # Добавим склады на концах
+        route_graph.nodes["0"]["object_type"] = "warehouse"
+        route_graph.nodes[str(n_nodes - 1)]["object_type"] = "warehouse"
+
+        start_time = time.perf_counter()
+        metrics = GraphMetricsService.calculate_metrics(route_graph)
+        elapsed = time.perf_counter() - start_time
+
+        metric_map = {m.name: m.value for m in metrics}
+        self.assertEqual(metric_map["vertex_count"], float(n_nodes))
+        self.assertGreater(metric_map["diameter_km"], 50.0)  # ~59.9 км
+        # Должно выполняться быстро, без построения N x N матрицы расстояний в памяти
+        self.assertLess(elapsed, 2.0)
+
 
 if __name__ == "__main__":
     unittest.main()

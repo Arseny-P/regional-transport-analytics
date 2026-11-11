@@ -116,6 +116,56 @@ class TestRoutingAndParallelEdges(unittest.TestCase):
         self.assertEqual(route_ba.node_path, [])
         self.assertEqual(route_ba.edge_keys, [])
 
+    def test_dijkstra_cache_memory_bounded_to_target_nodes(self):
+        """
+        Проверяет, что кэш Dijkstra ограничен ТОЛЬКО целевыми точками подключения складов,
+        а не материализует пути ко всем вершинам большой дорожной сети.
+        """
+        road_graph = nx.MultiDiGraph()
+        road_graph.graph["crs"] = "epsg:4326"
+
+        # Создаем линейную цепь из 50 дорожных узлов: 1 -> 2 -> ... -> 50
+        for i in range(1, 51):
+            road_graph.add_node(i, x=30.0 + i * 0.001, y=60.0)
+            if i > 1:
+                road_graph.add_edge(i - 1, i, key=0, length=100.0)
+
+        # Склады привязаны к узлам 1 и 5 (узлы 6..50 не являются точками подключения)
+        w_start = LogisticsNode(
+            id="W_START", name="Старт", object_type="warehouse",
+            latitude=60.0, longitude=30.001,
+            nearest_osm_node=1, access_nodes=[1],
+        )
+        w_end = LogisticsNode(
+            id="W_END", name="Финиш", object_type="warehouse",
+            latitude=60.0, longitude=30.005,
+            nearest_osm_node=5, access_nodes=[5],
+        )
+
+        dijkstra_cache = {}
+        res = self.service._calculate_best_route(
+            road_graph=road_graph,
+            start_nodes=[1],
+            end_nodes=[5],
+            origin_coords=(30.001, 60.0),
+            dest_coords=(30.005, 60.0),
+            dijkstra_cache=dijkstra_cache,
+            target_nodes={1, 5},
+        )
+
+        self.assertEqual(res["status"], RouteStatus.FOUND.value)
+        self.assertEqual(res["distance_m"], 400.0)
+        self.assertEqual(res["path"], [1, 2, 3, 4, 5])
+
+        # Проверяем кэш: в нем есть узел 5, но НЕТ узлов 6..50!
+        cached_lengths, cached_paths = dijkstra_cache[1]
+        self.assertIn(5, cached_lengths)
+        self.assertIn(5, cached_paths)
+        # Узлы за пределами целевого набора НЕ хранятся в кэше
+        for unused_node in range(6, 51):
+            self.assertNotIn(unused_node, cached_lengths)
+            self.assertNotIn(unused_node, cached_paths)
+
 
 if __name__ == "__main__":
     unittest.main()

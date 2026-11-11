@@ -666,6 +666,8 @@ class FacilityService:
                                 split_succeeded = True
                             else:
                                 virtual_id = 9_000_000_000 + (idx + 1)
+                                while virtual_id in road_graph:
+                                    virtual_id += 1
                                 if self._split_edge_for_virtual_node(road_graph, u_cand, v_cand, e_key, proj_pt, cut_dist, virtual_id):
                                     best_node_id = virtual_id
                                     best_lat = proj_lat
@@ -765,7 +767,8 @@ class FacilityService:
             snapped_nodes.append(node)
 
             warning_tag = " [!] ДАЛЕКО" if best_dist > 300 else ""
-            tag = " (виртуальный узел на ребре)" if best_node_id >= 9_000_000_000 else " (перекресток)"
+            is_virt = bool(road_graph.nodes.get(best_node_id, {}).get("is_virtual", False))
+            tag = " (виртуальный узел на ребре)" if is_virt else " (перекресток)"
             print(f"  [SmartSnap] '{node.name}' -> {len(node.access_nodes)} точек подключения "
                   f"(осн. узел {best_node_id}{tag}, плечо: {node.snap_distance_m} м){warning_tag}")
 

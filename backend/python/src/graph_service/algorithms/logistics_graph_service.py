@@ -1,6 +1,8 @@
 import os
 import json
-from typing import List, Dict, Any, Union, Optional, Tuple
+import heapq
+from itertools import count
+from typing import List, Dict, Any, Union, Optional, Tuple, Set
 import networkx as nx
 from shapely.geometry import Point, LineString, MultiLineString, mapping
 from shapely.ops import linemerge
@@ -84,6 +86,94 @@ class LogisticsGraphService:
         geom, _ = self._extract_route_geometry_and_keys(road_graph, path)
         return geom
 
+    @classmethod
+    def _dijkstra_to_targets(
+        cls,
+        road_graph: nx.MultiDiGraph,
+        source: int,
+        targets: Optional[Set[int]] = None,
+        weight: str = "length",
+    ) -> Tuple[Dict[int, float], Dict[int, List[int]]]:
+        """
+        Вычисляет кратчайшие пути от source до набора целевых вершин targets.
+        Прекращает поиск (early stopping), как только все достижимые вершины из targets найдены.
+        В отличие от стандартного single_source_dijkstra(G, source), НЕ сохраняет в памяти
+        пути ко всей остальной дорожной сети (тысячам/десяткам тысяч узлов региона),
+        что предотвращает исчерпание RAM.
+        """
+        if source not in road_graph:
+            return {}, {}
+
+        if targets is None:
+            try:
+                return nx.single_source_dijkstra(road_graph, source=source, weight=weight)
+            except (nx.NodeNotFound, KeyError):
+                return {}, {}
+
+        unvisited_targets = set(targets)
+        dist: Dict[int, float] = {}
+        paths: Dict[int, List[int]] = {}
+
+        if source in unvisited_targets:
+            dist[source] = 0.0
+            paths[source] = [source]
+            unvisited_targets.remove(source)
+
+        if not unvisited_targets:
+            return dist, paths
+
+        c = count()
+        fringe = [(0.0, next(c), source)]
+        seen: Dict[int, float] = {source: 0.0}
+        pred: Dict[int, int] = {}
+        all_dists: Dict[int, float] = {}
+
+        adj = road_graph._adj
+
+        while fringe and unvisited_targets:
+            d, _, u = heapq.heappop(fringe)
+            if u in all_dists:
+                continue
+            all_dists[u] = d
+
+            if u in unvisited_targets:
+                unvisited_targets.remove(u)
+                if not unvisited_targets:
+                    break
+
+            for v, edges in adj[u].items():
+                min_len = float("inf")
+                for e_data in edges.values():
+                    w = e_data.get(weight, 1.0)
+                    if w is not None and w < min_len:
+                        min_len = float(w)
+                if min_len == float("inf"):
+                    continue
+
+                vu_dist = d + min_len
+                if v not in seen or vu_dist < seen[v]:
+                    seen[v] = vu_dist
+                    pred[v] = u
+                    heapq.heappush(fringe, (vu_dist, next(c), v))
+
+        for t in targets:
+            if t in all_dists:
+                path = [t]
+                curr = t
+                seen_path = {t}
+                while curr != source and curr in pred:
+                    curr = pred[curr]
+                    if curr in seen_path:
+                        break
+                    seen_path.add(curr)
+                    path.append(curr)
+                if curr == source:
+                    path.reverse()
+                    paths[t] = path
+                    dist[t] = all_dists[t]
+
+        return dist, paths
+
     def _calculate_best_route(
         self, 
         road_graph: nx.MultiDiGraph, 
@@ -92,6 +182,7 @@ class LogisticsGraphService:
         origin_coords: Optional[Tuple[float, float]] = None,
         dest_coords: Optional[Tuple[float, float]] = None,
         dijkstra_cache: Optional[Dict[int, Tuple[Dict[int, float], Dict[int, List[int]]]]] = None,
+        target_nodes: Optional[Set[int]] = None,
     ) -> Dict[str, Any]:
         """
         Находит наилучший (кратчайший) маршрут среди пула кандидатов точек подключения.
@@ -109,6 +200,8 @@ class LogisticsGraphService:
         best_v = None
         best_path: List[int] = []
 
+        query_targets = target_nodes if target_nodes is not None else set(end_nodes)
+
         for u in start_nodes:
             if u not in road_graph:
                 continue
@@ -120,22 +213,28 @@ class LogisticsGraphService:
                 else 0.0
             )
 
-            # Получаем или кэшируем дерево кратчайших путей из точки u
+            # Получаем или кэшируем дерево кратчайших путей из точки u только до целевых вершин
             lengths: Dict[int, float] = {}
             paths: Dict[int, List[int]] = {}
             if dijkstra_cache is not None:
                 if u not in dijkstra_cache:
-                    try:
-                        lengths, paths = nx.single_source_dijkstra(road_graph, source=u, weight="length")
-                        dijkstra_cache[u] = (lengths, paths)
-                    except (nx.NodeNotFound, KeyError):
-                        dijkstra_cache[u] = ({}, {})
-                lengths, paths = dijkstra_cache[u]
+                    lengths, paths = self._dijkstra_to_targets(
+                        road_graph, source=u, targets=query_targets, weight="length"
+                    )
+                    dijkstra_cache[u] = (lengths, paths)
+                else:
+                    lengths, paths = dijkstra_cache[u]
+                    missing = set(end_nodes) - set(lengths.keys())
+                    if missing and any(v in road_graph for v in missing):
+                        add_lengths, add_paths = self._dijkstra_to_targets(
+                            road_graph, source=u, targets=missing, weight="length"
+                        )
+                        lengths.update(add_lengths)
+                        paths.update(add_paths)
             else:
-                try:
-                    lengths, paths = nx.single_source_dijkstra(road_graph, source=u, weight="length")
-                except (nx.NodeNotFound, KeyError):
-                    lengths, paths = {}, {}
+                lengths, paths = self._dijkstra_to_targets(
+                    road_graph, source=u, targets=query_targets, weight="length"
+                )
 
             for v in end_nodes:
                 if v not in road_graph:
@@ -324,6 +423,11 @@ class LogisticsGraphService:
 
         total_connections = 0
         dijkstra_cache: Dict[int, Tuple[Dict[int, float], Dict[int, List[int]]]] = {}
+        all_access_nodes: Set[int] = {
+            acc
+            for n in nodes
+            for acc in (n.access_nodes or ([n.nearest_osm_node] if n.nearest_osm_node else []))
+        }
 
         for i, j in sorted(pairs_to_check):
             node_a = nodes[i]
@@ -344,11 +448,13 @@ class LogisticsGraphService:
                 road_graph, access_a, access_b, 
                 origin_coords=coords_a, dest_coords=coords_b,
                 dijkstra_cache=dijkstra_cache,
+                target_nodes=all_access_nodes,
             )
             route_ba = self._calculate_best_route(
                 road_graph, access_b, access_a, 
                 origin_coords=coords_b, dest_coords=coords_a,
                 dijkstra_cache=dijkstra_cache,
+                target_nodes=all_access_nodes,
             )
 
             has_route_ab = route_ab["status"] == RouteStatus.FOUND.value
@@ -456,6 +562,12 @@ class LogisticsGraphService:
                 for j in range(i + 1, len(parsed_nodes)):
                     pairs_to_check.add((i, j))
 
+        all_access_nodes: Set[int] = {
+            acc
+            for n in parsed_nodes
+            for acc in (n.access_nodes or ([n.nearest_osm_node] if n.nearest_osm_node else []))
+        }
+
         dijkstra_cache: Dict[int, Tuple[Dict[int, float], Dict[int, List[int]]]] = {}
         routes: List[RouteDetail] = []
 
@@ -491,6 +603,7 @@ class LogisticsGraphService:
                 road_graph, access_a, access_b,
                 origin_coords=coords_a, dest_coords=coords_b,
                 dijkstra_cache=dijkstra_cache,
+                target_nodes=all_access_nodes,
             )
             routes.append(
                 RouteDetail(
@@ -515,6 +628,7 @@ class LogisticsGraphService:
                 road_graph, access_b, access_a,
                 origin_coords=coords_b, dest_coords=coords_a,
                 dijkstra_cache=dijkstra_cache,
+                target_nodes=all_access_nodes,
             )
             routes.append(
                 RouteDetail(
@@ -690,8 +804,9 @@ class LogisticsGraphService:
                 deg = road_graph.in_degree(n) + road_graph.out_degree(n)
                 is_intersection = (deg >= 3)
 
-            # Виртуальные врезанные узлы (ID >= 9_000_000_000) классифицируются как road_node
-            if isinstance(n, int) and n >= 9_000_000_000:
+            # Виртуальные врезанные узлы (is_virtual=True) классифицируются как road_node.
+            # Не используем эвристику по ID >= 9_000_000_000, так как реальные узлы OSM могут иметь ID > 10 млрд.
+            if bool(data.get("is_virtual", False)):
                 is_intersection = False
 
             node_type = "intersection" if is_intersection else "road_node"
