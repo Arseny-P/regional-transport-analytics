@@ -42,6 +42,20 @@ class GraphSerializer:
                     pass
             return {str(raw)}
 
+        def _get_edge_geometry(u_node: Any, v_node: Any, d: Dict[str, Any]) -> Optional[LineString]:
+            raw_geom = d.get("geometry")
+            if raw_geom is not None and isinstance(raw_geom, LineString):
+                return raw_geom
+            node_u = graph.nodes.get(u_node, {})
+            node_v = graph.nodes.get(v_node, {})
+            ux = node_u.get("x") or node_u.get("lon") or node_u.get("longitude")
+            uy = node_u.get("y") or node_u.get("lat") or node_u.get("latitude")
+            vx = node_v.get("x") or node_v.get("lon") or node_v.get("longitude")
+            vy = node_v.get("y") or node_v.get("lat") or node_v.get("latitude")
+            if ux is not None and uy is not None and vx is not None and vy is not None:
+                return LineString([(float(ux), float(uy)), (float(vx), float(vy))])
+            return None
+
         # 1. Группируем дорожные рёбра по неупорядоченной паре узлов (u_min, u_max)
         node_pairs: Dict[Tuple[str, str], List[Tuple[Any, Any, Any, Dict[str, Any]]]] = {}
         for u, v, k, d in graph.edges(keys=True, data=True):
@@ -64,36 +78,72 @@ class GraphSerializer:
             segments: List[List[Tuple[Any, Any, Any]]] = []
 
             for f_u, f_v, f_k, f_d in fwd:
+                if f_d.get("oneway", False):
+                    segments.append([(f_u, f_v, f_k)])
+                    continue
+
                 f_osms = _get_osmid_set(f_d)
                 f_len = float(f_d.get("length", 0.0) or f_d.get("length_m", 0.0))
+                geom_f = _get_edge_geometry(f_u, f_v, f_d)
                 best_match_idx = None
                 best_score = -1.0
 
-                if not f_d.get("oneway", False):
-                    for r_idx, (r_u, r_v, r_k, r_d) in enumerate(unmatched_rev):
-                        if r_d.get("oneway", False):
+                for r_idx, (r_u, r_v, r_k, r_d) in enumerate(unmatched_rev):
+                    if r_d.get("oneway", False):
+                        continue
+                    r_osms = _get_osmid_set(r_d)
+                    r_len = float(r_d.get("length", 0.0) or r_d.get("length_m", 0.0))
+
+                    # 1. Жесткая проверка по OSM ID:
+                    # Если у обоих рёбер есть OSM ID, они ОБЯЗАНЫ принадлежать одному OSM-way.
+                    # Несовпадающие OSM ID означают разные физические дороги (например, две параллельные полосы).
+                    if f_osms and r_osms:
+                        if f_osms.isdisjoint(r_osms):
                             continue
-                        r_osms = _get_osmid_set(r_d)
-                        r_len = float(r_d.get("length", 0.0) or r_d.get("length_m", 0.0))
+                        osmid_matched = True
+                    else:
+                        osmid_matched = False
 
-                        score = 0.0
-                        # Совпадение OSM ID — признак принадлежности к одному OSM way
-                        if f_osms and r_osms and (f_osms & r_osms):
-                            score += 1000.0
+                    # 2. Проверка геометрии:
+                    # Реверсированная геометрия встречного ребра должна совпадать с прямым
+                    geom_r = _get_edge_geometry(r_u, r_v, r_d)
+                    geom_matched = False
+                    if geom_f is not None and geom_r is not None:
+                        try:
+                            geom_r_rev = LineString(list(reversed(geom_r.coords)))
+                            hd = geom_f.hausdorff_distance(geom_r_rev)
+                            # Порог: 1e-4 градусов (~10 метров в WGS84)
+                            if hd > 1e-4:
+                                continue
+                            geom_matched = True
+                        except Exception:
+                            pass
 
-                        # Совпадение длины
-                        if f_len > 0.0 and r_len > 0.0:
-                            diff_rel = abs(f_len - r_len) / max(f_len, r_len)
-                            if diff_rel < 0.05:
-                                score += 100.0
-                            elif diff_rel < 0.25:
-                                score += 40.0
-                        elif len(fwd) == 1 and len(rev) == 1:
-                            score += 500.0
+                    # 3. Проверка длины:
+                    if f_len > 0.0 and r_len > 0.0:
+                        diff_rel = abs(f_len - r_len) / max(f_len, r_len)
+                        # Допустимая разница не более 5% (или 2 метров)
+                        if diff_rel > 0.05 and abs(f_len - r_len) > 2.0:
+                            continue
 
-                        if score > best_score and score >= 40.0:
-                            best_score = score
-                            best_match_idx = r_idx
+                    # 4. Если нет ни osmid, ни различающей геометрии при нескольких параллельных рёбрах:
+                    if not osmid_matched and not geom_matched and (len(fwd) > 1 or len(rev) > 1):
+                        if f_len <= 0.0 or r_len <= 0.0 or abs(f_len - r_len) > 0.1:
+                            continue
+
+                    score = 0.0
+                    if osmid_matched:
+                        score += 1000.0
+                    if geom_matched:
+                        score += 500.0
+                    if f_len > 0.0 and r_len > 0.0:
+                        score += max(0.0, 100.0 - abs(f_len - r_len))
+                    elif len(fwd) == 1 and len(rev) == 1:
+                        score += 100.0
+
+                    if score > best_score:
+                        best_score = score
+                        best_match_idx = r_idx
 
                 if best_match_idx is not None:
                     matched_r = unmatched_rev.pop(best_match_idx)

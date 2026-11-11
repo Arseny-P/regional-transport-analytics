@@ -832,16 +832,41 @@ class FacilityService:
                             c_osmids = {str(x) for x in c_raw}
                         else:
                             c_osmids = {str(c_raw)}
-                    score = 0.0
-                    if fwd_osmids and c_osmids and (fwd_osmids & c_osmids):
-                        score += 1000.0
+
+                    # 1. Жесткая проверка по OSM ID: разные OSM ID не могут быть встречными ветками
+                    if fwd_osmids and c_osmids:
+                        if fwd_osmids.isdisjoint(c_osmids):
+                            continue
+                        osmid_matched = True
+                    else:
+                        osmid_matched = False
+
+                    # 2. Проверка геометрии (Hausdorff distance)
+                    c_geom = c_data.get("geometry")
+                    geom_matched = False
+                    if geom is not None and c_geom is not None and isinstance(geom, LineString) and isinstance(c_geom, LineString):
+                        try:
+                            c_geom_rev = LineString(list(reversed(c_geom.coords)))
+                            if geom.hausdorff_distance(c_geom_rev) > 1e-4:
+                                continue
+                            geom_matched = True
+                        except Exception:
+                            pass
+
                     c_len = float(c_data.get("length", 0.0))
                     if orig_len > 0.0 and c_len > 0.0:
                         diff = abs(orig_len - c_len) / max(orig_len, c_len)
-                        if diff < 0.05:
-                            score += 100.0
-                        elif diff < 0.25:
-                            score += 40.0
+                        if diff > 0.05 and abs(orig_len - c_len) > 2.0:
+                            continue
+
+                    score = 0.0
+                    if osmid_matched:
+                        score += 1000.0
+                    if geom_matched:
+                        score += 500.0
+                    if orig_len > 0.0 and c_len > 0.0:
+                        score += max(0.0, 100.0 - abs(orig_len - c_len))
+
                     if score > best_score:
                         best_score = score
                         matched_rev_k = c_k

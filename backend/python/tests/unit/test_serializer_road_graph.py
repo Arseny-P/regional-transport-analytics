@@ -186,6 +186,49 @@ class TestSerializerRoadGraph(unittest.TestCase):
         # Дорога A и Дорога B не склеиваются ошибочно
         self.assertNotEqual(edge_dict["road_A_fwd"].segment_id, edge_dict["road_B_fwd"].segment_id)
 
+    def test_similar_length_different_osmid_or_geometry_not_merged(self):
+        """
+        Проверяет сценарий из ревью:
+        Два разных участка близкой длины (100м и 102м) НЕ должны получать общий segment_id:
+        1. Если у них разные OSM ID (например, 100 и 102) — сопоставление запрещено.
+        2. Если у них разная геометрия (прямая vs изогнутая траектория) — сопоставление запрещено.
+        """
+        # 1. Проверка по разным OSM ID при близкой длине (100м и 102м)
+        g_osm = nx.MultiDiGraph()
+        g_osm.add_node("1", x=30.0, y=60.0)
+        g_osm.add_node("2", x=30.01, y=60.01)
+        g_osm.add_edge("1", "2", key=0, edge_type="road", id="r_fwd_100", length_m=100.0, osmid=100)
+        g_osm.add_edge("2", "1", key=0, edge_type="road", id="r_rev_102", length_m=102.0, osmid=102)
+
+        payload_osm = GraphSerializer.serialize(g_osm)
+        edge_map_osm = {e.id: e for e in payload_osm.edges}
+        self.assertNotEqual(
+            edge_map_osm["r_fwd_100"].segment_id,
+            edge_map_osm["r_rev_102"].segment_id,
+            "Участки с разными OSM ID не должны объединяться в один segment_id!"
+        )
+
+        # 2. Проверка по разной геометрии (прямая линия vs дуга)
+        g_geom = nx.MultiDiGraph()
+        g_geom.add_node("1", x=30.0, y=60.0)
+        g_geom.add_node("2", x=30.01, y=60.01)
+        g_geom.add_edge(
+            "1", "2", key=0, edge_type="road", id="g_fwd_straight", length_m=100.0,
+            geometry=LineString([(30.0, 60.0), (30.01, 60.01)])
+        )
+        g_geom.add_edge(
+            "2", "1", key=0, edge_type="road", id="g_rev_curved", length_m=102.0,
+            geometry=LineString([(30.01, 60.01), (30.005, 60.007), (30.0, 60.0)])
+        )
+
+        payload_geom = GraphSerializer.serialize(g_geom)
+        edge_map_geom = {e.id: e for e in payload_geom.edges}
+        self.assertNotEqual(
+            edge_map_geom["g_fwd_straight"].segment_id,
+            edge_map_geom["g_rev_curved"].segment_id,
+            "Участки с расходящейся геометрией не должны объединяться в один segment_id!"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
