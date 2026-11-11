@@ -1,6 +1,10 @@
 package domain
 
-import "github.com/google/uuid"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 type DLQMessage struct {
 	JobID     *uuid.UUID
@@ -69,4 +73,15 @@ type Metric struct {
 type ErrorResp struct {
 	Code    string
 	Message string
+}
+
+type Heartbeat struct {
+	Time   time.Time
+	Status string
+}
+type HeartbeatResponse struct {
+	Status           JobStatus
+	GraphAvailable   bool
+	MetricsAvailable bool
+	Error            *ErrorResp
 }
