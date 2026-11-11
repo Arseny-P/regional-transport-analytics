@@ -40,6 +40,8 @@ class GraphSerializer:
 
             for extra_key in (
                 "is_isolated",
+                "isolation_reason",
+                "snap_kind",
                 "snap_distance_m",
                 "nearest_osm_node",
                 "street_count",

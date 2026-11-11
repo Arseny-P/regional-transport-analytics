@@ -771,9 +771,12 @@ class LogisticsGraphService:
                     }
                 connectors_to_add[c_in_key]["routes_count"] += 1
 
-        # 4. Добавляем склады в граф (включая изолированные)
+        # 4. Добавляем склады в граф (включая изолированные с фиксацией причины)
         for w_id, w in warehouses.items():
-            is_isolated = (w_id not in connected_warehouses)
+            is_isolated = (w_id not in connected_warehouses) or bool(w.is_isolated)
+            isolation_reason = w.isolation_reason
+            if is_isolated and not isolation_reason:
+                isolation_reason = "Кратчайшие маршруты к другим объектам не найдены"
             obj_type = w.object_type if w.object_type in ("warehouse", "terminal", "port", "facility") else "warehouse"
             route_graph.add_node(
                 str(w_id),
@@ -784,7 +787,9 @@ class LogisticsGraphService:
                 x=w.longitude,
                 y=w.latitude,
                 is_isolated=is_isolated,
+                isolation_reason=isolation_reason if is_isolated else None,
                 snap_distance_m=w.snap_distance_m if w.snap_distance_m is not None else 0.0,
+                snap_kind=getattr(w, "snap_kind", None) or ("unconnected" if is_isolated else "osm_node"),
                 nearest_osm_node=w.nearest_osm_node,
                 region_ids=",".join(w.region_ids) if isinstance(w.region_ids, list) else str(w.region_ids),
             )
@@ -968,7 +973,7 @@ class LogisticsGraphService:
                 "object_type": obj_type,
                 "feature_type": feature_type,
             }
-            for k in ("is_isolated", "snap_distance_m", "street_count", "highway"):
+            for k in ("is_isolated", "isolation_reason", "snap_kind", "snap_distance_m", "street_count", "highway"):
                 if k in data and data[k] is not None:
                     props[k] = data[k]
 
