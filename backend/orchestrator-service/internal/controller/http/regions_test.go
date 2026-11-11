@@ -37,14 +37,6 @@ func (mockU *MockRegionUsecase) AddRegion(context.Context, string, string, dto.R
 	panic("unexpected AddRegion call")
 }
 
-func (mockU *MockRegionUsecase) CreateJob(context.Context, uuid.UUID, uuid.UUID, float64, float64, float64, float64, []domain.Transport) (domain.JobStatus, bool, error) {
-	panic("unexpected CreateJob call")
-}
-
-func (mockU *MockRegionUsecase) GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error) {
-	panic("unexpected GetAnalysisResult call")
-}
-
 func TestGetRegionsHandler(t *testing.T) {
 	firstID := uuid.New()
 	secondID := uuid.New()
@@ -82,7 +74,7 @@ func TestGetRegionsHandler(t *testing.T) {
 	for _, tt := range testTable {
 		t.Run(tt.Name, func(t *testing.T) {
 			mockUsecase := MockRegionUsecase{regions: tt.Regions, err: tt.UsecaseErr}
-			controller := NewHTTPController(&mockUsecase, slog.Default())
+			controller := NewHTTPController(nil, &mockUsecase, nil, slog.Default())
 			request := httptest.NewRequest(http.MethodGet, "/regions", http.NoBody)
 			response := httptest.NewRecorder()
 
@@ -162,7 +154,7 @@ func TestGetRegionHandler(t *testing.T) {
 	for _, tt := range testTable {
 		t.Run(tt.Name, func(t *testing.T) {
 			mockUsecase := MockRegionUsecase{region: tt.Region, err: tt.UsecaseErr}
-			controller := NewHTTPController(&mockUsecase, slog.Default())
+			controller := NewHTTPController(nil, &mockUsecase, nil, slog.Default())
 			request := httptest.NewRequest(http.MethodGet, "/regions/"+tt.RegionID, http.NoBody)
 			response := httptest.NewRecorder()
 

@@ -7,14 +7,18 @@ import (
 )
 
 type HTTPController struct {
-	usecaseOrchestrator UsecaseOrchestrator
-	logger              *slog.Logger
+	jobUsecase      JobUsecase
+	regionUsecase   RegionUsecase
+	heartbeatWorker HeartbeatWorker
+	logger          *slog.Logger
 }
 
-func NewHTTPController(usecaseOrchestrator UsecaseOrchestrator, logger *slog.Logger) *HTTPController {
+func NewHTTPController(jobUsecase JobUsecase, regionUsecase RegionUsecase, heartbeatWorker HeartbeatWorker, logger *slog.Logger) *HTTPController {
 	return &HTTPController{
-		usecaseOrchestrator: usecaseOrchestrator,
-		logger:              logger,
+		jobUsecase:      jobUsecase,
+		regionUsecase:   regionUsecase,
+		heartbeatWorker: heartbeatWorker,
+		logger:          logger,
 	}
 }
 

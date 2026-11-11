@@ -15,7 +15,8 @@ info:
     Все примеры данных условные. Лимит файла региона — 20 МБ (20 000 000 байт).
     Формат файла — GeoJSON FeatureCollection с полигональными границами.
     Область, выходящая за регион, отклоняется.
-    Heartbeat отправляется каждые 5 секунд и возвращает статус задачи;
+    Heartbeat отправляется каждые 5 секунд независимо от загрузки результата
+    и возвращает статус задачи, флаги доступности данных и ошибку анализа;
     после 10 секунд без heartbeat запрашивается отмена незавершённой задачи.
     Сроки хранения и автоматическая очистка данных пока не определены.
 
@@ -275,16 +276,43 @@ paths:
         Подтверждает активность пользователя, ожидающего результат задачи.
         Возвращает состояние, доступность результатов и ошибку,
         если она есть, тем же ответом, включая итоговое состояние.
-        Frontend автоматически отправляет запрос каждые 5 секунд,
+        Ответ содержит job_id, status, graph_available, metrics_available
+        и необязательное поле error. Сам граф и массив метрик в heartbeat
+        не передаются: для них используется GET /analysis/result.
+
+        Первый heartbeat отправляется сразу после принятия задачи.
+        Затем frontend автоматически отправляет запрос каждые 5 секунд,
         пока задача не перешла в completed, failed или canceled.
+        Интервал отсчитывается между отправками запросов, а не как пауза
+        после получения ответа. Ожидание ответа heartbeat или загрузка
+        графа и метрик не должны задерживать следующие heartbeat.
         Пользователю не нужно вручную запрашивать статус.
         Отдельной ручки статуса нет.
+
+        Когда хотя бы один из флагов graph_available или metrics_available
+        равен true либо задача перешла в итоговое состояние, frontend
+        запрашивает GET /analysis/result. После успешного получения результата
+        повторный запрос нужен при изменении status или любого из этих флагов.
+        Получение итогового результата выполняется и при failed или canceled:
+        у задачи может остаться доступный частичный результат.
+        Временная ошибка получения результата допускает повтор GET без
+        изменения состояния задачи; результат не считается полученным
+        до успешного ответа. После итогового статуса heartbeat прекращается,
+        но незавершённые повторы GET /analysis/result могут продолжаться.
+
+        Ошибка вычислений возвращается в error при HTTP 200.
+        Просроченный heartbeat также возвращает HTTP 200 с текущим состоянием
+        задачи и флагами доступности результатов. В error передаётся код
+        heartbeat_timeout_exceeded: heartbeat не поступал более 10 секунд.
+        Такой запрос не продлевает срок активности и не возобновляет задачу.
+        HTTP 500 означает ошибку обработки самого запроса heartbeat.
         Ошибка HTTP-запроса heartbeat сама по себе не означает ошибку вычислений.
 
         Если от пользователя нет heartbeat в течение 10 секунд, сервер
         запрашивает отмену незавершённой задачи: cancel_requested,
         затем canceled после подтверждения остановки.
-        Срок отсчитывается на сервере от последнего принятого heartbeat;
+        Срок отсчитывается на сервере от времени получения последнего принятого
+        heartbeat, а не от завершения обработки или отправки ответа;
         до первого heartbeat — от принятия задачи.
         Речь об отсутствии сигналов, а не движений мыши или ввода с клавиатуры.
         Закрытие вкладки не обнаруживается мгновенно.
@@ -294,7 +322,39 @@ paths:
         - $ref: '#/components/parameters/JobId'
       responses:
         '200':
-          $ref: '#/components/responses/JobStatus'
+          description: Статус задачи и доступность результатов; ошибка анализа или просрочка heartbeat передаётся в необязательном поле error.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnalysisStatus'
+              examples:
+                running:
+                  summary: Задача выполняется, результаты ещё не доступны.
+                  value:
+                    job_id: 550e8400-e29b-41d4-a716-446655440000
+                    status: running
+                    graph_available: false
+                    metrics_available: false
+                heartbeatTimeout:
+                  summary: Heartbeat просрочен, возвращается текущее состояние задачи.
+                  value:
+                    job_id: 550e8400-e29b-41d4-a716-446655440000
+                    status: running
+                    graph_available: false
+                    metrics_available: false
+                    error:
+                      code: heartbeat_timeout_exceeded
+                      message: Heartbeat не поступал более 10 секунд. Срок подтверждения активности истёк
+                failedWithPartialResult:
+                  summary: Анализ завершился ошибкой, сохранённый граф доступен.
+                  value:
+                    job_id: 550e8400-e29b-41d4-a716-446655440000
+                    status: failed
+                    graph_available: true
+                    metrics_available: false
+                    error:
+                      code: metrics_calculation_failed
+                      message: Не удалось рассчитать метрики.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -380,6 +440,8 @@ paths:
         описывается полем error с кодом и сообщением. HTTP 500 означает ошибку
         обработки самого запроса результата.
         Чтение результата не обновляет heartbeat и не запускает вычисления заново.
+        Получение результата выполняется независимо от отправки heartbeat:
+        длительный GET не должен приводить к пропуску сигналов активности.
         Граф и метрики возвращаются целиком без разбиения на страницы.
         Конкретный список показателей не ограничивается примерами в контракте.
       parameters:
@@ -446,24 +508,51 @@ components:
       name: job_id
       required: true
       description: |
-        Идентификатор, назначенный сервером при создании задачи.
+        UUID, переданный клиентом в job_id при POST /analysis.
         Используется для heartbeat со статусом, отмены и получения результата.
       schema:
         $ref: '#/components/schemas/Identifier'
-      example: job-001
+      example: 550e8400-e29b-41d4-a716-446655440000
 
   responses:
     JobStatus:
-      description: Текущее состояние задачи.
+      description: Текущее состояние задачи, доступность результатов и необязательная ошибка анализа.
       content:
         application/json:
           schema:
             $ref: '#/components/schemas/AnalysisStatus'
-          example:
-            job_id: job-001
-            status: running
-            graph_available: true
-            metrics_available: false
+          examples:
+            waitingForGraph:
+              summary: Задача выполняется, результаты ещё не доступны.
+              value:
+                job_id: 550e8400-e29b-41d4-a716-446655440000
+                status: running
+                graph_available: false
+                metrics_available: false
+            graphReady:
+              summary: Граф можно получить, метрики ещё рассчитываются.
+              value:
+                job_id: 550e8400-e29b-41d4-a716-446655440000
+                status: running
+                graph_available: true
+                metrics_available: false
+            completed:
+              summary: Анализ завершён, граф и метрики доступны.
+              value:
+                job_id: 550e8400-e29b-41d4-a716-446655440000
+                status: completed
+                graph_available: true
+                metrics_available: true
+            metricsFailed:
+              summary: Расчёт метрик завершился ошибкой, граф сохранён.
+              value:
+                job_id: 550e8400-e29b-41d4-a716-446655440000
+                status: failed
+                graph_available: true
+                metrics_available: false
+                error:
+                  code: metrics_calculation_failed
+                  message: Не удалось рассчитать метрики.
     BadRequest:
       description: Некорректный формат запроса или отсутствует обязательный параметр.
       content:
@@ -698,6 +787,11 @@ components:
 
     AnalysisStatus:
       type: object
+      description: |
+        Состояние задачи без самого графа и массива метрик.
+        Оба флага доступности обязательны и имеют тип boolean.
+        Они отражают наличие сохранённых данных и не заменяют status:
+        частичный результат может быть доступен у running, failed или canceled.
       required: [job_id, status, graph_available, metrics_available]
       properties:
         job_id:
@@ -706,12 +800,12 @@ components:
           $ref: '#/components/schemas/JobState'
         graph_available:
           type: boolean
-          description: Можно ли получить граф этой задачи.
+          description: В GET /analysis/result доступен сохранённый граф, в том числе пустой.
         metrics_available:
           type: boolean
-          description: Можно ли получить метрики этой задачи.
+          description: В GET /analysis/result доступен сохранённый массив метрик, в том числе пустой.
         error:
-          description: Ошибка выполнения задачи с кодом и понятным сообщением.
+          description: Необязательная причина ошибки анализа или просрочки heartbeat с кодом и понятным сообщением; при отсутствии ошибки поле не передаётся.
           allOf:
             - $ref: '#/components/schemas/AnalysisFailure'
 
