@@ -6,7 +6,7 @@ from shapely.geometry import Point, LineString, MultiLineString, mapping
 from shapely.ops import linemerge
 from shapely import wkt
 
-from graph_service.domain.models import LogisticsNode, LogisticsEdge, TransportMode, RouteStatus, GraphRole
+from graph_service.domain.models import LogisticsNode, LogisticsEdge, TransportMode, RouteStatus, GraphRole, RouteDetail
 
 
 class LogisticsGraphService:
@@ -18,20 +18,38 @@ class LogisticsGraphService:
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
 
-    def _extract_route_geometry(self, road_graph: nx.MultiDiGraph, path: List[int]) -> LineString:
+    @staticmethod
+    def _get_best_edge(road_graph: nx.MultiDiGraph, u: int, v: int) -> Tuple[Any, Dict[str, Any]]:
         """
-        Склеивает последовательные сегменты ребер пути в единую непрерывную геометрию LineString.
+        Возвращает (key, edge_data) для ребра с минимальным весом 'length'
+        между узлами u и v в MultiDiGraph (решение проблемы выбора конкретного ребра, а не всегда key=0).
+        """
+        edges = road_graph[u][v]
+        if not edges:
+            return 0, {}
+        best_key = min(edges.keys(), key=lambda k: edges[k].get("length", float("inf")))
+        return best_key, edges[best_key]
+
+    def _extract_route_geometry_and_keys(
+        self, road_graph: nx.MultiDiGraph, path: List[int]
+    ) -> Tuple[LineString, List[Tuple[int, int, Any]]]:
+        """
+        Склеивает последовательные сегменты ребер пути в единую непрерывную геометрию LineString
+        и извлекает конкретные ключи параллельных рёбер (u, v, key).
         """
         if not path:
-            return LineString()
+            return LineString(), []
         if len(path) == 1:
             pt = (float(road_graph.nodes[path[0]]["x"]), float(road_graph.nodes[path[0]]["y"]))
-            return LineString([pt, pt])
+            return LineString([pt, pt]), []
 
         lines = []
+        edge_keys: List[Tuple[int, int, Any]] = []
+
         for u, v in zip(path[:-1], path[1:]):
-            edge_data = road_graph[u][v][0]
-            if "geometry" in edge_data:
+            k, edge_data = self._get_best_edge(road_graph, u, v)
+            edge_keys.append((u, v, k))
+            if "geometry" in edge_data and isinstance(edge_data["geometry"], LineString):
                 lines.append(edge_data["geometry"])
             else:
                 p1 = (float(road_graph.nodes[u]["x"]), float(road_graph.nodes[u]["y"]))
@@ -40,21 +58,31 @@ class LogisticsGraphService:
 
         if not lines:
             pt = (float(road_graph.nodes[path[0]]["x"]), float(road_graph.nodes[path[0]]["y"]))
-            return LineString([pt, pt])
+            return LineString([pt, pt]), edge_keys
 
         merged = linemerge(lines)
         if isinstance(merged, MultiLineString):
             coords = []
             for ls in merged.geoms:
                 coords.extend(ls.coords)
-            return LineString(coords)
+            geom = LineString(coords)
         elif isinstance(merged, LineString):
-            return merged
+            geom = merged
         else:
             coords = []
             for u in path:
                 coords.append((float(road_graph.nodes[u]["x"]), float(road_graph.nodes[u]["y"])))
-            return LineString(coords)
+            geom = LineString(coords)
+
+        return geom, edge_keys
+
+    def _extract_route_geometry(self, road_graph: nx.MultiDiGraph, path: List[int]) -> LineString:
+        """
+        Склеивает последовательные сегменты ребер пути в единую непрерывную геометрию LineString.
+        Обеспечивает обратную совместимость с использованием _extract_route_geometry_and_keys.
+        """
+        geom, _ = self._extract_route_geometry_and_keys(road_graph, path)
+        return geom
 
     def _calculate_best_route(
         self, 
@@ -62,12 +90,14 @@ class LogisticsGraphService:
         start_nodes: List[int], 
         end_nodes: List[int],
         origin_coords: Optional[Tuple[float, float]] = None,
-        dest_coords: Optional[Tuple[float, float]] = None
+        dest_coords: Optional[Tuple[float, float]] = None,
+        dijkstra_cache: Optional[Dict[int, Tuple[Dict[int, float], Dict[int, List[int]]]]] = None,
     ) -> Dict[str, Any]:
         """
         Находит наилучший (кратчайший) маршрут среди пула кандидатов точек подключения.
         Реализует сквозную минимизацию полной дистанции Door-to-Door (плечо_A + дорога + плечо_B).
-        Дополнительно выполняет сквозное дотягивание маршрута до центроидов объектов (Last-Mile Access).
+        Использует кэш Dijkstra по начальным дорожным точкам для повторного использования вычислений.
+        Корректно обрабатывает параллельные ребра MultiDiGraph.
         """
         import osmnx as ox
 
@@ -77,6 +107,7 @@ class LogisticsGraphService:
         best_snap_v = 0.0
         best_u = None
         best_v = None
+        best_path: List[int] = []
 
         for u in start_nodes:
             if u not in road_graph:
@@ -89,10 +120,25 @@ class LogisticsGraphService:
                 else 0.0
             )
 
+            # Получаем или кэшируем дерево кратчайших путей из точки u
+            lengths: Dict[int, float] = {}
+            paths: Dict[int, List[int]] = {}
+            if dijkstra_cache is not None:
+                if u not in dijkstra_cache:
+                    try:
+                        lengths, paths = nx.single_source_dijkstra(road_graph, source=u, weight="length")
+                        dijkstra_cache[u] = (lengths, paths)
+                    except (nx.NodeNotFound, KeyError):
+                        dijkstra_cache[u] = ({}, {})
+                lengths, paths = dijkstra_cache[u]
+            else:
+                try:
+                    lengths, paths = nx.single_source_dijkstra(road_graph, source=u, weight="length")
+                except (nx.NodeNotFound, KeyError):
+                    lengths, paths = {}, {}
+
             for v in end_nodes:
                 if v not in road_graph:
-                    continue
-                if u == v:
                     continue
 
                 v_lat = float(road_graph.nodes[v]["y"])
@@ -103,18 +149,24 @@ class LogisticsGraphService:
                     else 0.0
                 )
 
-                try:
-                    d = nx.shortest_path_length(road_graph, source=u, target=v, weight="length")
-                    total_candidate = d + snap_u + snap_v
-                    if total_candidate < best_total_distance:
-                        best_total_distance = total_candidate
-                        best_distance = d
-                        best_snap_u = snap_u
-                        best_snap_v = snap_v
-                        best_u = u
-                        best_v = v
-                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                if u == v:
+                    d = 0.0
+                    candidate_path = [u]
+                elif v in lengths:
+                    d = lengths[v]
+                    candidate_path = paths[v]
+                else:
                     continue
+
+                total_candidate = d + snap_u + snap_v
+                if total_candidate < best_total_distance:
+                    best_total_distance = total_candidate
+                    best_distance = d
+                    best_snap_u = snap_u
+                    best_snap_v = snap_v
+                    best_u = u
+                    best_v = v
+                    best_path = candidate_path
 
         if best_u is None or best_v is None or best_distance == float("inf"):
             return {
@@ -125,6 +177,7 @@ class LogisticsGraphService:
                 "snap_dest_m": None,
                 "nodes_count": 0,
                 "path": [],
+                "edge_keys": [],
                 "geom_wkt": None,
                 "road_geom_wkt": None,
                 "access_u": None,
@@ -133,8 +186,8 @@ class LogisticsGraphService:
                 "dest_conn_wkt": None,
             }
 
-        path_nodes = [int(n) for n in nx.shortest_path(road_graph, source=best_u, target=best_v, weight="length")]
-        route_geom = self._extract_route_geometry(road_graph, path_nodes)
+        path_nodes = [int(n) for n in best_path]
+        route_geom, edge_keys = self._extract_route_geometry_and_keys(road_graph, path_nodes)
 
         u_lon = float(road_graph.nodes[best_u]["x"])
         u_lat = float(road_graph.nodes[best_u]["y"])
@@ -151,7 +204,10 @@ class LogisticsGraphService:
             door_to_door_coords.append(origin_coords)
             origin_conn_wkt = LineString([origin_coords, (u_lon, u_lat)]).wkt
 
-        door_to_door_coords.extend(list(route_geom.coords))
+        if len(route_geom.coords) > 0:
+            door_to_door_coords.extend(list(route_geom.coords))
+        else:
+            door_to_door_coords.extend([(u_lon, u_lat), (v_lon, v_lat)])
 
         if dest_coords:
             door_to_door_coords.append(dest_coords)
@@ -168,6 +224,7 @@ class LogisticsGraphService:
             "snap_dest_m": round(float(snap_dest_m), 1),
             "nodes_count": len(path_nodes),
             "path": path_nodes,
+            "edge_keys": edge_keys,
             "geom_wkt": door_to_door_geom.wkt,
             "road_geom_wkt": route_geom.wkt,
             "access_u": best_u,
@@ -266,6 +323,7 @@ class LogisticsGraphService:
                     pairs_to_check.add((i, j))
 
         total_connections = 0
+        dijkstra_cache: Dict[int, Tuple[Dict[int, float], Dict[int, List[int]]]] = {}
 
         for i, j in sorted(pairs_to_check):
             node_a = nodes[i]
@@ -284,11 +342,13 @@ class LogisticsGraphService:
             # Находим лучший маршрут туда (A -> B) и обратно (B -> A) среди кандидатов
             route_ab = self._calculate_best_route(
                 road_graph, access_a, access_b, 
-                origin_coords=coords_a, dest_coords=coords_b
+                origin_coords=coords_a, dest_coords=coords_b,
+                dijkstra_cache=dijkstra_cache,
             )
             route_ba = self._calculate_best_route(
                 road_graph, access_b, access_a, 
-                origin_coords=coords_b, dest_coords=coords_a
+                origin_coords=coords_b, dest_coords=coords_a,
+                dijkstra_cache=dijkstra_cache,
             )
 
             has_route_ab = route_ab["status"] == RouteStatus.FOUND.value
@@ -310,6 +370,7 @@ class LogisticsGraphService:
                 route_status_ab=route_ab["status"],
                 osm_nodes_count_ab=route_ab["nodes_count"],
                 path_osm_nodes_ab=route_ab["path"],
+                edge_keys_ab=route_ab.get("edge_keys", []),
                 geometry_ab_wkt=route_ab["geom_wkt"],
                 road_geometry_ab_wkt=route_ab["road_geom_wkt"],
                 distance_ba_m=route_ba["distance_m"],
@@ -319,6 +380,7 @@ class LogisticsGraphService:
                 route_status_ba=route_ba["status"],
                 osm_nodes_count_ba=route_ba["nodes_count"],
                 path_osm_nodes_ba=route_ba["path"],
+                edge_keys_ba=route_ba.get("edge_keys", []),
                 geometry_ba_wkt=route_ba["geom_wkt"],
                 road_geometry_ba_wkt=route_ba["road_geom_wkt"],
                 connection_status="candidate"
@@ -347,6 +409,132 @@ class LogisticsGraphService:
 
         print(f"[+] Логистический MultiGraph сформирован: {len(log_graph.nodes)} вершин, {len(log_graph.edges)} логистических связей.")
         return log_graph
+
+    def calculate_all_routes(
+        self,
+        road_graph: nx.MultiDiGraph,
+        nodes: List[Union[LogisticsNode, Dict[str, Any]]],
+        k_neighbors: Optional[int] = None,
+    ) -> List[RouteDetail]:
+        """
+        Вычисляет направленные маршруты между всеми парами складов
+        с кэшированием вычислений по общим точкам привязки на дорожной сети.
+        """
+        parsed_nodes: List[LogisticsNode] = []
+        for n in nodes:
+            if isinstance(n, LogisticsNode):
+                parsed_nodes.append(n)
+            else:
+                parsed_nodes.append(
+                    LogisticsNode(
+                        id=str(n["id"]),
+                        name=str(n.get("name") or n["id"]),
+                        object_type=str(n.get("object_type") or n.get("type", "facility")),
+                        latitude=float(n.get("latitude") or n.get("lat")),
+                        longitude=float(n.get("longitude") or n.get("lon")),
+                        nearest_osm_node=n.get("nearest_osm_node"),
+                        access_nodes=n.get("access_nodes", []),
+                        is_isolated=bool(n.get("is_isolated", False)),
+                    )
+                )
+
+        pairs_to_check = set()
+        if k_neighbors is not None and k_neighbors > 0 and len(parsed_nodes) > 1:
+            import osmnx as ox
+            for i, src in enumerate(parsed_nodes):
+                dists = []
+                for j, dst in enumerate(parsed_nodes):
+                    if i != j:
+                        d = ox.distance.great_circle(src.latitude, src.longitude, dst.latitude, dst.longitude)
+                        dists.append((j, d))
+                dists.sort(key=lambda x: x[1])
+                for j, _ in dists[:k_neighbors]:
+                    pair = tuple(sorted([i, j]))
+                    pairs_to_check.add(pair)
+        else:
+            for i in range(len(parsed_nodes)):
+                for j in range(i + 1, len(parsed_nodes)):
+                    pairs_to_check.add((i, j))
+
+        dijkstra_cache: Dict[int, Tuple[Dict[int, float], Dict[int, List[int]]]] = {}
+        routes: List[RouteDetail] = []
+
+        for i, j in sorted(pairs_to_check):
+            node_a = parsed_nodes[i]
+            node_b = parsed_nodes[j]
+
+            access_a = node_a.access_nodes or ([node_a.nearest_osm_node] if node_a.nearest_osm_node else [])
+            access_b = node_b.access_nodes or ([node_b.nearest_osm_node] if node_b.nearest_osm_node else [])
+
+            if not access_a or not access_b:
+                routes.append(
+                    RouteDetail(
+                        origin_id=node_a.id,
+                        destination_id=node_b.id,
+                        status=RouteStatus.NOT_FOUND_IN_DATA.value,
+                    )
+                )
+                routes.append(
+                    RouteDetail(
+                        origin_id=node_b.id,
+                        destination_id=node_a.id,
+                        status=RouteStatus.NOT_FOUND_IN_DATA.value,
+                    )
+                )
+                continue
+
+            coords_a = (node_a.longitude, node_a.latitude)
+            coords_b = (node_b.longitude, node_b.latitude)
+
+            # Направление A -> B
+            res_ab = self._calculate_best_route(
+                road_graph, access_a, access_b,
+                origin_coords=coords_a, dest_coords=coords_b,
+                dijkstra_cache=dijkstra_cache,
+            )
+            routes.append(
+                RouteDetail(
+                    origin_id=node_a.id,
+                    destination_id=node_b.id,
+                    status=res_ab["status"],
+                    road_length_m=res_ab["distance_m"],
+                    total_length_m=res_ab["total_distance_m"],
+                    snap_origin_m=res_ab["snap_origin_m"],
+                    snap_dest_m=res_ab["snap_dest_m"],
+                    node_path=res_ab["path"],
+                    edge_keys=res_ab["edge_keys"],
+                    road_geometry_wkt=res_ab["road_geom_wkt"],
+                    full_geometry_wkt=res_ab["geom_wkt"],
+                    access_u=res_ab["access_u"],
+                    access_v=res_ab["access_v"],
+                )
+            )
+
+            # Направление B -> A
+            res_ba = self._calculate_best_route(
+                road_graph, access_b, access_a,
+                origin_coords=coords_b, dest_coords=coords_a,
+                dijkstra_cache=dijkstra_cache,
+            )
+            routes.append(
+                RouteDetail(
+                    origin_id=node_b.id,
+                    destination_id=node_a.id,
+                    status=res_ba["status"],
+                    road_length_m=res_ba["distance_m"],
+                    total_length_m=res_ba["total_distance_m"],
+                    snap_origin_m=res_ba["snap_origin_m"],
+                    snap_dest_m=res_ba["snap_dest_m"],
+                    node_path=res_ba["path"],
+                    edge_keys=res_ba["edge_keys"],
+                    road_geometry_wkt=res_ba["road_geom_wkt"],
+                    full_geometry_wkt=res_ba["geom_wkt"],
+                    access_u=res_ba["access_u"],
+                    access_v=res_ba["access_v"],
+                )
+            )
+
+        return routes
 
     def save_graphml(self, log_graph: nx.MultiGraph, filename: str) -> str:
         """

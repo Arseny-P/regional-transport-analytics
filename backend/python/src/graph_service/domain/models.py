@@ -188,6 +188,7 @@ class LogisticsEdge:
     route_status_ab: str = RouteStatus.NOT_CHECKED.value
     osm_nodes_count_ab: int = 0
     path_osm_nodes_ab: List[int] = field(default_factory=list)
+    edge_keys_ab: List[tuple[int, int, Any]] = field(default_factory=list)
     geometry_ab_wkt: Optional[str] = None
     road_geometry_ab_wkt: Optional[str] = None
     
@@ -200,6 +201,7 @@ class LogisticsEdge:
     route_status_ba: str = RouteStatus.NOT_CHECKED.value
     osm_nodes_count_ba: int = 0
     path_osm_nodes_ba: List[int] = field(default_factory=list)
+    edge_keys_ba: List[tuple[int, int, Any]] = field(default_factory=list)
     geometry_ba_wkt: Optional[str] = None
     road_geometry_ba_wkt: Optional[str] = None
     
@@ -219,6 +221,8 @@ class LogisticsEdge:
             "duration_ab_sec": self.duration_ab_sec,
             "route_status_ab": self.route_status_ab,
             "osm_nodes_count_ab": self.osm_nodes_count_ab,
+            "path_osm_nodes_ab": self.path_osm_nodes_ab,
+            "edge_keys_ab": [list(e) for e in self.edge_keys_ab],
             "geometry_ab_wkt": self.geometry_ab_wkt,
             "road_geometry_ab_wkt": self.road_geometry_ab_wkt,
             "distance_ba_m": self.distance_ba_m,
@@ -228,9 +232,50 @@ class LogisticsEdge:
             "duration_ba_sec": self.duration_ba_sec,
             "route_status_ba": self.route_status_ba,
             "osm_nodes_count_ba": self.osm_nodes_count_ba,
+            "path_osm_nodes_ba": self.path_osm_nodes_ba,
+            "edge_keys_ba": [list(e) for e in self.edge_keys_ba],
             "geometry_ba_wkt": self.geometry_ba_wkt,
             "road_geometry_ba_wkt": self.road_geometry_ba_wkt,
             "connection_status": self.connection_status,
+        }
+
+
+@dataclass
+class RouteDetail:
+    """
+    Детализированный направленный маршрут между парой складов (origin -> destination).
+    Хранит информацию о статусе поиска, длине, последовательности дорожных узлов
+    и ключах выбранных направленных рёбер (u, v, key).
+    """
+    origin_id: str
+    destination_id: str
+    status: str = RouteStatus.NOT_CHECKED.value
+    road_length_m: Optional[float] = None
+    total_length_m: Optional[float] = None
+    snap_origin_m: Optional[float] = None
+    snap_dest_m: Optional[float] = None
+    node_path: List[int] = field(default_factory=list)
+    edge_keys: List[tuple[int, int, Any]] = field(default_factory=list)
+    road_geometry_wkt: Optional[str] = None
+    full_geometry_wkt: Optional[str] = None
+    access_u: Optional[int] = None
+    access_v: Optional[int] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "origin_id": self.origin_id,
+            "destination_id": self.destination_id,
+            "status": self.status,
+            "road_length_m": self.road_length_m,
+            "total_length_m": self.total_length_m,
+            "snap_origin_m": self.snap_origin_m,
+            "snap_dest_m": self.snap_dest_m,
+            "node_path": self.node_path,
+            "edge_keys": [list(e) for e in self.edge_keys],
+            "road_geometry_wkt": self.road_geometry_wkt,
+            "full_geometry_wkt": self.full_geometry_wkt,
+            "access_u": self.access_u,
+            "access_v": self.access_v,
         }
 
 
@@ -324,6 +369,7 @@ class AnalysisResponse:
     artifacts: Dict[str, Optional[str]] = field(default_factory=dict)
     hubs: List[Dict[str, Any]] = field(default_factory=list)
     connections: List[Dict[str, Any]] = field(default_factory=list)
+    routes: List[Dict[str, Any]] = field(default_factory=list)
     geojson: Optional[Dict[str, Any]] = None
     warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
@@ -337,6 +383,7 @@ class AnalysisResponse:
             "artifacts": self.artifacts,
             "hubs": self.hubs,
             "connections": self.connections,
+            "routes": self.routes,
             "geojson": self.geojson,
             "warnings": self.warnings,
             "error_message": self.error_message,
