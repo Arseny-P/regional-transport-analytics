@@ -7,9 +7,121 @@ import (
 	"orchestrator-service/internal/dto"
 	httpdto "orchestrator-service/internal/dto/http"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+func (hc *HTTPController) SendAnalysisHeartbeatHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		receivedAt := time.Now()
+		jobIDString := r.URL.Query().Get("job_id")
+		if jobIDString == "" {
+			hc.writeError(w, errMissingJobID)
+			return
+		}
+		jobID, err := uuid.Parse(jobIDString)
+		if err != nil {
+			hc.writeError(w, errInvalidJobID)
+			return
+		}
+		heartbeatErr := hc.heartbeatWorker.UpdateHeartbeat(jobID, receivedAt, receivedAt.Add(10*time.Second))
+		response, err := hc.heartbeatWorker.GetHeartbeatResponse(r.Context(), jobID)
+		if r.Context().Err() != nil {
+			return
+		}
+		if err != nil {
+			status, _ := ReturnErrorRespWithCode(err)
+			if status == http.StatusInternalServerError {
+				hc.logger.ErrorContext(r.Context(), "analysis heartbeat failed", "job_id", jobID, "error", err)
+			}
+			hc.writeError(w, err)
+			return
+		}
+		if response.Status == "" {
+			hc.logger.ErrorContext(r.Context(), "empty analysis heartbeat status", "job_id", jobID)
+			hc.writeError(w, domain.ErrInternalServer)
+			return
+		}
+		body := httpdto.AnalysisStatus{
+			JobID:            jobIDString,
+			Status:           httpdto.JobState(response.Status),
+			GraphAvailable:   response.GraphAvailable,
+			MetricsAvailable: response.MetricsAvailable,
+		}
+		if response.Error != nil {
+			body.Error = &httpdto.AnalysisFailure{
+				Code: response.Error.Code, Message: response.Error.Message,
+			}
+		}
+		if heartbeatErr != nil {
+			status, errorBody := ReturnErrorRespWithCode(heartbeatErr)
+			if status != http.StatusOK {
+				if status == http.StatusInternalServerError {
+					hc.logger.ErrorContext(r.Context(), "update heartbeat failed", "job_id", jobID, "error", heartbeatErr)
+				}
+				hc.WriteResponse(w, status, errorBody)
+				return
+			}
+			body.Error = &httpdto.AnalysisFailure{
+				Code: errorBody.Code, Message: errorBody.Message,
+			}
+		}
+		hc.WriteResponse(w, http.StatusOK, body)
+	}
+}
+
+func (hc *HTTPController) CancelAnalysisHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		jobIDString := r.URL.Query().Get("job_id")
+		if jobIDString == "" {
+			hc.writeError(w, errMissingJobID)
+			return
+		}
+		jobID, err := uuid.Parse(jobIDString)
+		if err != nil {
+			hc.writeError(w, errInvalidJobID)
+			return
+		}
+
+		result, pending, err := hc.jobUsecase.CancelJob(r.Context(), jobID)
+		if err != nil {
+			status, _ := ReturnErrorRespWithCode(err)
+			if status == http.StatusInternalServerError && r.Context().Err() == nil {
+				hc.logger.ErrorContext(r.Context(), "analysis cancellation failed", "job_id", jobID, "error", err)
+			}
+			hc.writeError(w, err)
+			return
+		}
+		switch result.Payload.Status {
+		case "completed", "failed":
+			hc.writeError(w, domain.ErrJobAlreadyFinished)
+			return
+		case "cancel_requested", "canceled":
+		default:
+			hc.logger.ErrorContext(r.Context(), "unexpected analysis cancellation status", "job_id", jobID, "status", result.Payload.Status)
+			hc.writeError(w, domain.ErrInternalServer)
+			return
+		}
+
+		body := httpdto.AnalysisStatus{
+			JobID:            result.JobID.String(),
+			Status:           httpdto.JobState(result.Payload.Status),
+			GraphAvailable:   result.GraphAvailable,
+			MetricsAvailable: result.MetricsAvailable,
+		}
+		if result.Payload.Error != nil {
+			body.Error = &httpdto.AnalysisFailure{
+				Code: result.Payload.Error.Code, Message: result.Payload.Error.Message,
+			}
+		}
+		status := http.StatusOK
+		if pending {
+			status = http.StatusAccepted
+		}
+		hc.WriteResponse(w, status, body)
+	}
+}
 
 func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +166,7 @@ func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 			hc.writeError(w, errInvalidRegionID)
 			return
 		}
-		jobStatus, isCreated, err := hc.usecaseOrchestrator.CreateJob(r.Context(), jobID, regionID,
+		jobStatus, isCreated, err := hc.jobUsecase.CreateJob(r.Context(), jobID, regionID,
 			req.Area.FirstPoint.Latitude, req.Area.FirstPoint.Longitude,
 			req.Area.SecondPoint.Latitude, req.Area.SecondPoint.Longitude,
 			transports,
@@ -68,6 +180,13 @@ func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 			}
 			hc.writeError(w, err)
 			return
+		}
+		if isCreated {
+			updateErr := hc.heartbeatWorker.UpdateHeartbeat(jobID, time.Now(), time.Now().Add(10*time.Second))
+			if updateErr != nil {
+				hc.writeError(w, updateErr)
+				return
+			}
 		}
 
 		resp := httpdto.AnalysisReceipt{
@@ -96,7 +215,7 @@ func (hc *HTTPController) GetAnalysisResultHandler() http.HandlerFunc {
 			hc.writeError(w, errInvalidJobID)
 			return
 		}
-		result, err := hc.usecaseOrchestrator.GetAnalysisResult(r.Context(), jobID)
+		result, err := hc.jobUsecase.GetAnalysisResult(r.Context(), jobID)
 		if err != nil {
 			status, _ := ReturnErrorRespWithCode(err)
 			if status == http.StatusInternalServerError && r.Context().Err() == nil {
