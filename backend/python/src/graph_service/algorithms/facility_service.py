@@ -884,6 +884,36 @@ class FacilityService:
                     )
                 )
 
+        # 0. Валидация координат складов
+        valid_nodes: List[LogisticsNode] = []
+        invalid_nodes: List[LogisticsNode] = []
+        for n in log_nodes:
+            if (
+                n.latitude is None
+                or n.longitude is None
+                or not isfinite(n.latitude)
+                or not isfinite(n.longitude)
+                or not (-90.0 <= n.latitude <= 90.0)
+                or not (-180.0 <= n.longitude <= 180.0)
+            ):
+                n.nearest_osm_node = None
+                n.osm_node_lat = None
+                n.osm_node_lon = None
+                n.snap_distance_m = None
+                n.snap_kind = "unconnected"
+                n.access_nodes = []
+                n.is_isolated = True
+                n.isolation_reason = "Отсутствуют или некорректны координаты склада"
+                n.identification_basis["connection_status"] = "isolated"
+                n.identification_basis["isolation_reason"] = n.isolation_reason
+                n.identification_basis["snap_kind"] = "unconnected"
+                invalid_nodes.append(n)
+            else:
+                valid_nodes.append(n)
+
+        if not valid_nodes:
+            return invalid_nodes
+
         # 1. Определение основной связной компоненты (Largest Connected Component)
         # Исключаем изолированные островки, где проезд отрезан от остальной сети
         if filter_disconnected and len(road_graph.nodes) > 1:
@@ -899,8 +929,8 @@ class FacilityService:
         else:
             active_graph = road_graph
 
-        lons = [n.longitude for n in log_nodes]
-        lats = [n.latitude for n in log_nodes]
+        lons = [n.longitude for n in valid_nodes]
+        lats = [n.latitude for n in valid_nodes]
 
         # 2. Поиск ближайших вершин в связной компоненте
         primary_node_ids = ox.nearest_nodes(active_graph, X=lons, Y=lats)
@@ -919,20 +949,21 @@ class FacilityService:
                 else:
                     edge_list = [edge_res]
 
-                if len(log_nodes) == 1 and len(edge_list) > 0 and not isinstance(edge_list[0], (list, tuple)):
+                if len(valid_nodes) == 1 and len(edge_list) > 0 and not isinstance(edge_list[0], (list, tuple)):
                     nearest_edge_tuples = [tuple(edge_list)]
                 else:
                     nearest_edge_tuples = [tuple(e) if isinstance(e, (list, tuple)) else e for e in edge_list]
             except Exception:
-                nearest_edge_tuples = [None] * len(log_nodes)
+                nearest_edge_tuples = [None] * len(valid_nodes)
         else:
-            nearest_edge_tuples = [None] * len(log_nodes)
+            nearest_edge_tuples = [None] * len(valid_nodes)
 
-        snapped_nodes: List[LogisticsNode] = []
+        snapped_nodes: List[LogisticsNode] = list(invalid_nodes)
 
-        for idx, (node, primary_id) in enumerate(zip(log_nodes, primary_node_ids)):
+        for idx, (node, primary_id) in enumerate(zip(valid_nodes, primary_node_ids)):
             primary_id_native = int(primary_id)
             split_succeeded = False
+            snap_kind = "osm_node"
             best_node_id = primary_id_native
             best_lat = float(road_graph.nodes[primary_id_native]["y"])
             best_lon = float(road_graph.nodes[primary_id_native]["x"])
@@ -976,7 +1007,10 @@ class FacilityService:
                                 best_lon = float(road_graph.nodes[u_cand]["x"])
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
                                 access_pool = [u_cand]
+                                if v_cand in road_graph and v_cand != u_cand:
+                                    access_pool.append(v_cand)
                                 split_succeeded = True
+                                snap_kind = "osm_node"
                             elif dist_to_v < 8.0:
                                 # Проекция находится в пределах 8 метров от перекрёстка v
                                 best_node_id = v_cand
@@ -984,7 +1018,10 @@ class FacilityService:
                                 best_lon = float(road_graph.nodes[v_cand]["x"])
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
                                 access_pool = [v_cand]
+                                if u_cand in road_graph and u_cand != v_cand:
+                                    access_pool.append(u_cand)
                                 split_succeeded = True
+                                snap_kind = "osm_node"
                             else:
                                 virtual_id = 9_000_000_000 + (idx + 1)
                                 while virtual_id in road_graph:
@@ -995,7 +1032,12 @@ class FacilityService:
                                     best_lon = proj_lon
                                     best_dist = proj_dist_m
                                     access_pool = [virtual_id]
+                                    if u_cand in road_graph and u_cand != virtual_id:
+                                        access_pool.append(u_cand)
+                                    if v_cand in road_graph and v_cand != virtual_id:
+                                        access_pool.append(v_cand)
                                     split_succeeded = True
+                                    snap_kind = "virtual_node"
 
             # 2. Если врезка не удалась — резервный выбор из перекрёстков-кандидатов с защитой от тупиков
             if not split_succeeded:
@@ -1068,12 +1110,17 @@ class FacilityService:
                 node.osm_node_lat = None
                 node.osm_node_lon = None
                 node.snap_distance_m = round(float(best_dist), 1)
+                node.snap_kind = "unconnected"
                 node.access_nodes = []
                 node.is_isolated = True
                 node.isolation_reason = (
                     f"Превышен лимит расстояния до автодороги: {round(float(best_dist), 1)} м > {max_snap_distance_m:.1f} м "
                     f"(объект в акватории или нет подъездных путей)"
                 )
+                node.identification_basis["connection_status"] = "isolated"
+                node.identification_basis["isolation_reason"] = node.isolation_reason
+                node.identification_basis["snap_kind"] = "unconnected"
+                node.identification_basis["snap_distance_m"] = node.snap_distance_m
                 snapped_nodes.append(node)
                 print(f"  [SmartSnap] '{node.name}' -> [!] ИЗОЛИРОВАН: расстояние до дорожной сети {node.snap_distance_m} м > {max_snap_distance_m:.1f} м (морская акватория / нет автодорог)")
                 continue
@@ -1082,9 +1129,14 @@ class FacilityService:
             node.osm_node_lat = best_lat
             node.osm_node_lon = best_lon
             node.snap_distance_m = round(float(best_dist), 1)
+            node.snap_kind = snap_kind
             node.access_nodes = access_pool
             node.is_isolated = False
             node.isolation_reason = None
+            node.identification_basis["connection_status"] = "connected"
+            node.identification_basis["snap_kind"] = snap_kind
+            node.identification_basis["snap_distance_m"] = node.snap_distance_m
+            node.identification_basis["options_count"] = len(node.access_nodes)
             snapped_nodes.append(node)
 
             warning_tag = " [!] ДАЛЕКО" if best_dist > 300 else ""
@@ -1094,4 +1146,61 @@ class FacilityService:
                   f"(осн. узел {best_node_id}{tag}, плечо: {node.snap_distance_m} м){warning_tag}")
 
         return snapped_nodes
+
+    @staticmethod
+    def get_snap_report(warehouses: List[LogisticsNode]) -> List[Dict[str, Any]]:
+        """
+        Формирует подробный отчет по привязке складов к дорожной сети (#64):
+        ID склада, координаты, дорожная точка, расстояние, варианты и причина отсутствия привязки.
+        """
+        report: List[Dict[str, Any]] = []
+        for w in warehouses:
+            has_snap = bool(w.nearest_osm_node is not None and not w.is_isolated)
+            kind = getattr(w, "snap_kind", None) or ("osm_node" if has_snap else "unconnected")
+            report.append({
+                "warehouse_id": w.id,
+                "name": w.name,
+                "latitude": w.latitude,
+                "longitude": w.longitude,
+                "nearest_osm_node": w.nearest_osm_node,
+                "osm_node_lat": w.osm_node_lat,
+                "osm_node_lon": w.osm_node_lon,
+                "snap_distance_m": w.snap_distance_m,
+                "snap_kind": kind,
+                "access_nodes": list(w.access_nodes),
+                "options_count": len(w.access_nodes),
+                "is_isolated": w.is_isolated,
+                "isolation_reason": w.isolation_reason or ("" if has_snap else "Точка не найдена"),
+            })
+        return report
+
+    @staticmethod
+    def get_snap_summary(warehouses: List[LogisticsNode]) -> Dict[str, Any]:
+        """
+        Формирует агрегированную статистику по привязке складов (#64).
+        """
+        total = len(warehouses)
+        connected = [w for w in warehouses if not w.is_isolated and w.nearest_osm_node is not None]
+        isolated = [w for w in warehouses if w.is_isolated or w.nearest_osm_node is None]
+
+        from collections import Counter
+        primary_counts = Counter(w.nearest_osm_node for w in connected if w.nearest_osm_node is not None)
+        shared_directions = sum(count * (count - 1) for count in primary_counts.values())
+
+        distances = [w.snap_distance_m for w in connected if w.snap_distance_m is not None]
+        avg_dist = round(sum(distances) / len(distances), 1) if distances else 0.0
+        max_dist = round(max(distances), 1) if distances else 0.0
+
+        kinds = Counter(getattr(w, "snap_kind", "unknown") for w in warehouses)
+
+        return {
+            "total_warehouses": total,
+            "connected_count": len(connected),
+            "isolated_count": len(isolated),
+            "unique_primary_nodes": len(primary_counts),
+            "shared_primary_node_directions": shared_directions,
+            "avg_snap_distance_m": avg_dist,
+            "max_snap_distance_m": max_dist,
+            "snap_kinds": dict(kinds),
+        }
 

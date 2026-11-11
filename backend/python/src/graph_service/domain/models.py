@@ -121,6 +121,7 @@ class LogisticsNode:
     osm_node_lat: Optional[float] = None
     osm_node_lon: Optional[float] = None
     snap_distance_m: Optional[float] = None
+    snap_kind: Optional[str] = None
     access_nodes: List[int] = field(default_factory=list)
     is_isolated: bool = False
     isolation_reason: Optional[str] = None
