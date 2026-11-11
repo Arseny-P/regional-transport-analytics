@@ -1,6 +1,10 @@
 import os
 import json
-from typing import List, Dict, Any, Optional
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from math import isfinite
+from numbers import Integral
+from typing import List, Dict, Any, Optional, Tuple, Set
 import networkx as nx
 import osmnx as ox
 import pandas as pd
@@ -16,6 +20,29 @@ from graph_service.domain.models import (
 from graph_service.domain.errors import FacilityValidationError
 import geopandas as gpd
 from graph_service.http.osm_client import execute_with_overpass_fallback
+
+
+WAREHOUSE_OSM_TAGS = {
+    "building": ["warehouse"],
+    "building:use": ["warehouse"],
+    "industrial": ["warehouse", "logistics"],
+    "amenity": ["warehouse"],
+}
+
+WAREHOUSE_TAGS = ("building:use", "building", "industrial")
+TAGS_TO_KEEP = (*WAREHOUSE_TAGS, "landuse", "amenity", "name", "operator", "disused", "abandoned")
+POLYGON_TYPES = {"Polygon", "MultiPolygon"}
+WAREHOUSE_WORDS = ("склад", "логист", "распределительн", "warehouse", "logistics")
+
+
+@dataclass(frozen=True)
+class WarehouseInput:
+    osm_id: str
+    tags: Mapping[str, object]
+    latitude: float | None
+    longitude: float | None
+    polygon_area_m2: float | None = None
+    enclosing_site_ids: tuple[str, ...] = ()
 
 
 class FacilityService:
@@ -48,9 +75,16 @@ class FacilityService:
         "port": ["cargo"],
     }
 
+    WAREHOUSE_OSM_TAGS = WAREHOUSE_OSM_TAGS
+    WAREHOUSE_TAGS = WAREHOUSE_TAGS
+    TAGS_TO_KEEP = TAGS_TO_KEEP
+    POLYGON_TYPES = POLYGON_TYPES
+    WAREHOUSE_WORDS = WAREHOUSE_WORDS
+
     def __init__(self, storage_dir: str = "data"):
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
+        self.last_audit_log: List[Dict[str, Any]] = []
 
     def parse_and_validate_facilities(
         self,
@@ -362,18 +396,294 @@ class FacilityService:
               f"{sum(1 for n in selected_nodes if n.graph_role == GraphRole.NESTED_CANDIDATE.value)} вложенных в комплексы).")
         return selected_nodes
 
+    # =========================================================================
+    # Правила отбора складов #64 (Sprint 4 Issue 2)
+    # =========================================================================
+
+    @staticmethod
+    def _text(tags: Mapping[str, object], key: str) -> str:
+        value = tags.get(key)
+        return value.strip() if isinstance(value, str) else ""
+
+    @classmethod
+    def _normalized(cls, tags: Mapping[str, object], key: str) -> str:
+        return " ".join(cls._text(tags, key).casefold().split())
+
+    @classmethod
+    def _classify(cls, tags: Mapping[str, object]) -> Tuple[str, str, str, List[str]]:
+        matched = [
+            f"{key}=warehouse"
+            for key in cls.WAREHOUSE_TAGS
+            if cls._normalized(tags, key) == "warehouse"
+        ]
+        if matched:
+            use = cls._normalized(tags, "building:use")
+            if use and use != "warehouse":
+                return "review", "", "conflicting_building_use", matched + [f"building:use={use}"]
+            if any(cls._normalized(tags, key) == "yes" for key in ("disused", "abandoned")):
+                return "review", "", "inactive_object", matched
+            kind = "building" if matched[0].startswith("building") else "site"
+            return "eligible", kind, "warehouse_tag", matched
+
+        if cls._normalized(tags, "industrial") == "logistics":
+            return "review", "", "warehouse_use_to_check", ["industrial=logistics"]
+        if cls._normalized(tags, "amenity") == "warehouse":
+            return "review", "", "warehouse_use_to_check", ["amenity=warehouse"]
+        name = cls._normalized(tags, "name")
+        if any(word in name for word in cls.WAREHOUSE_WORDS):
+            return "review", "", "warehouse_word_in_name", []
+        return "excluded", "", "no_warehouse_evidence", []
+
+    @staticmethod
+    def _footprint(obj: WarehouseInput) -> Optional[float]:
+        area = obj.polygon_area_m2
+        return area if area is not None and isfinite(area) and area > 0 else None
+
+    @classmethod
+    def select_warehouses(
+        cls,
+        objects: Iterable[WarehouseInput],
+        *,
+        region_id: str = "custom",
+        limit: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Отбор самостоятельных складов для дорожного графа согласно правилам #64.
+        Возвращает:
+          - аргументы для создания LogisticsNode (выбранные склады)
+          - журнал аудита/решений по всем OSM ID.
+        """
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, Integral) or limit < 1:
+                raise ValueError("limit должен быть положительным целым числом или None")
+
+        by_id: Dict[str, WarehouseInput] = {}
+        for obj in objects:
+            by_id.setdefault(obj.osm_id, obj)
+
+        audit: Dict[str, Dict[str, Any]] = {}
+        for osm_id, obj in by_id.items():
+            decision, kind, reason, tags = cls._classify(obj.tags)
+            if decision == "eligible":
+                lat, lon = obj.latitude, obj.longitude
+                if lat is None or lon is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                    decision, reason = "review", "missing_or_invalid_geometry"
+            audit[osm_id] = {
+                "osm_id": osm_id,
+                "name": cls._text(obj.tags, "name"),
+                "operator": cls._text(obj.tags, "operator"),
+                "kind": kind,
+                "decision": decision,
+                "reason": reason,
+                "matched_tags": tags,
+                "source_tags": {
+                    key: value for key, value in obj.tags.items()
+                    if isinstance(value, str) and value.strip()
+                },
+                "parent_osm_id": None,
+                "warehouse_area_m2": cls._footprint(obj) if kind == "building" else None,
+            }
+
+        # Вложенность и подтверждение принадлежности проверяются до применения лимита.
+        proposed_parents: Dict[str, str] = {}
+        ambiguous_sites: Set[str] = set()
+        for osm_id, obj in by_id.items():
+            if audit[osm_id]["decision"] != "eligible" or audit[osm_id]["kind"] != "building":
+                continue
+            plausible_sites = []
+            matching_sites = []
+            child_operator = cls._normalized(obj.tags, "operator")
+            child_name = cls._normalized(obj.tags, "name")
+
+            for site_id in set(obj.enclosing_site_ids):
+                site = audit.get(site_id)
+                if not site or site["decision"] != "eligible" or site["kind"] != "site":
+                    continue
+                site_tags = by_id[site_id].tags
+                site_operator = cls._normalized(site_tags, "operator")
+                if child_operator and site_operator and child_operator != site_operator:
+                    continue
+                plausible_sites.append(site_id)
+                same_operator = bool(child_operator and child_operator == site_operator)
+                same_name = bool(child_name and child_name == cls._normalized(site_tags, "name"))
+                if same_operator or same_name:
+                    matching_sites.append(site_id)
+
+            if len(plausible_sites) == 1 and matching_sites:
+                proposed_parents[osm_id] = matching_sites[0]
+            elif plausible_sites:
+                ambiguous_sites.update(plausible_sites)
+
+        for site_id in ambiguous_sites:
+            audit[site_id].update(decision="review", reason="ambiguous_complex_membership")
+
+        members: Dict[str, List[str]] = {}
+        for building_id, site_id in proposed_parents.items():
+            if site_id in ambiguous_sites:
+                continue
+            audit[building_id].update(
+                decision="grouped", reason="same_complex", parent_osm_id=site_id,
+            )
+            members.setdefault(site_id, []).append(building_id)
+
+        for site_id, child_ids in members.items():
+            areas = [cls._footprint(by_id[child_id]) for child_id in child_ids]
+            known_areas = [area for area in areas if area is not None]
+            if known_areas:
+                audit[site_id]["warehouse_area_m2"] = sum(known_areas)
+
+        ready = sorted(osm_id for osm_id, row in audit.items() if row["decision"] == "eligible")
+        if limit is not None and len(ready) > limit:
+            def priority(osm_id: str):
+                row = audit[osm_id]
+                area = row["warehouse_area_m2"]
+                info_count = bool(row["name"]) + bool(row["operator"])
+                return area is None, -(area or 0), -info_count, osm_id
+
+            ready.sort(key=priority)
+            for osm_id in ready[limit:]:
+                audit[osm_id].update(decision="over_limit", reason="selection_limit")
+            ready = ready[:limit]
+
+        selected: List[Dict[str, Any]] = []
+        for osm_id in ready:
+            obj, row = by_id[osm_id], audit[osm_id]
+            row["decision"] = "selected"
+            source_ids = [osm_id, *sorted(members.get(osm_id, []))]
+            node_id = "warehouse_" + osm_id.replace(":", "_").replace("/", "_")
+            label = "Складской комплекс" if row["kind"] == "site" else "Склад"
+            selected.append({
+                "id": node_id,
+                "name": row["name"] or f"{label} ({osm_id})",
+                "object_type": "warehouse",
+                "latitude": round(float(obj.latitude), 6) if obj.latitude is not None else None,
+                "longitude": round(float(obj.longitude), 6) if obj.longitude is not None else None,
+                "region_ids": [region_id],
+                "source_osm_ids": source_ids,
+                "verification_status": VerificationStatus.CANDIDATE.value,
+                "transport_modes": [TransportMode.ROAD.value],
+                "graph_role": GraphRole.NODE_CANDIDATE.value,
+                "identification_basis": {
+                    "matched_tag": row["matched_tags"][0] if row["matched_tags"] else "warehouse",
+                    "matched_tags": row["matched_tags"],
+                    "tag_strength": "strong",
+                    "warehouse_kind": row["kind"],
+                    "warehouse_area_m2": row["warehouse_area_m2"],
+                    "operator": row["operator"] or None,
+                },
+            })
+
+        return selected, [audit[osm_id] for osm_id in sorted(audit)]
+
+    @classmethod
+    def select_warehouses_from_gdf(
+        cls,
+        features: Any,
+        *,
+        region_id: str = "custom",
+        limit: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Преобразовать выгрузку OSMnx (GeoDataFrame) и применить правила отбора #64.
+        """
+        if features is None or getattr(features, "empty", True):
+            return cls.select_warehouses([], region_id=region_id, limit=limit)
+
+        import geopandas as gpd
+
+        if getattr(features, "crs", None) is None:
+            features = features.copy()
+            features.set_crs("EPSG:4326", inplace=True)
+
+        work = features.loc[~features.index.duplicated()].to_crs("EPSG:4326")
+        if work.index.nlevels == 2:
+            work.index = [f"osm:{element}/{osm_id}" for element, osm_id in work.index]
+        else:
+            work.index = [cls._format_osm_id(idx, row) for idx, row in work.iterrows()]
+
+        geometry_column = work.geometry.name
+        geometry = work.geometry
+        valid = geometry.is_valid & ~geometry.is_empty
+        polygons = valid & geometry.geom_type.isin(cls.POLYGON_TYPES)
+        supported = polygons | (valid & geometry.geom_type.eq("Point"))
+
+        tag_rows = work.reindex(columns=cls.TAGS_TO_KEEP).to_dict(orient="index")
+        decisions = {osm_id: cls._classify(tags) for osm_id, tags in tag_rows.items()}
+        buildings = [
+            osm_id for osm_id, (decision, kind, _, _) in decisions.items()
+            if decision == "eligible" and kind == "building" and supported.loc[osm_id]
+        ]
+        sites = [
+            osm_id for osm_id, (decision, kind, _, _) in decisions.items()
+            if decision == "eligible" and kind == "site" and polygons.loc[osm_id]
+        ]
+        footprints = geometry.loc[[osm_id for osm_id in buildings if polygons.loc[osm_id]]]
+        areas = footprints.to_crs("EPSG:6933").area.to_dict() if len(footprints) else {}
+
+        enclosing: Dict[str, Tuple[str, ...]] = {}
+        if buildings and sites:
+            site_shapes = work.loc[sites, [geometry_column]].assign(site_osm_id=sites)
+            try:
+                matches = gpd.sjoin(
+                    work.loc[buildings, [geometry_column]],
+                    site_shapes,
+                    how="inner",
+                    predicate="covered_by",
+                )
+                if not matches.empty:
+                    enclosing = matches.groupby(level=0)["site_osm_id"].agg(tuple).to_dict()
+            except Exception:
+                enclosing = {}
+
+        objects = []
+        for osm_id, tags in tag_rows.items():
+            point = geometry.loc[osm_id].representative_point() if supported.loc[osm_id] else None
+            objects.append(WarehouseInput(
+                osm_id=osm_id,
+                tags=tags,
+                latitude=float(point.y) if point is not None else None,
+                longitude=float(point.x) if point is not None else None,
+                polygon_area_m2=areas.get(osm_id),
+                enclosing_site_ids=enclosing.get(osm_id, ()),
+            ))
+
+        return cls.select_warehouses(objects, region_id=region_id, limit=limit)
+
+    def select_warehouse_nodes_from_gdf(
+        self,
+        features: Any,
+        *,
+        region_id: str = "custom",
+        limit: Optional[int] = None,
+    ) -> Tuple[List[LogisticsNode], List[Dict[str, Any]]]:
+        """
+        Преобразует выгрузку OSMnx в валидированные объекты LogisticsNode по правилам #64.
+        Также сохраняет журнал аудита в self.last_audit_log.
+        """
+        selected_dicts, audit = self.select_warehouses_from_gdf(
+            features=features,
+            region_id=region_id,
+            limit=limit,
+        )
+        nodes: List[LogisticsNode] = []
+        for d in selected_dicts:
+            nodes.append(LogisticsNode(**d))
+        self.last_audit_log = audit
+        return nodes, audit
+
     def fetch_from_osm_bbox(
         self,
         bbox: TerritoryBounds,
         tags: Optional[Dict[str, Any]] = None,
         limit: int = 15,
         region_id: str = "custom",
+        use_rules_64: bool = True,
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM внутри заданного BBox.
         """
         bbox.validate()
-        query_tags = tags or self.DEFAULT_OSM_TAGS
+        query_tags = tags or (self.WAREHOUSE_OSM_TAGS if use_rules_64 else self.DEFAULT_OSM_TAGS)
 
         print(f"[*] Поиск логистических объектов в OSM для BBox: "
               f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
@@ -387,9 +697,14 @@ class FacilityService:
             print(f"[-] Ошибка при запросе к OSM Overpass API по BBox: {e}")
             return []
 
-        if gdf.empty:
+        if gdf is None or getattr(gdf, "empty", True):
             print("[-] Подходящих объектов в указанном BBox не найдено.")
             return []
+
+        if use_rules_64:
+            nodes, audit = self.select_warehouse_nodes_from_gdf(gdf, limit=limit, region_id=region_id)
+            print(f"[+] Из OSM по правилам #64 отобрано {len(nodes)} складов (всего проверено объектов: {len(audit)}).")
+            return nodes
 
         return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
 
@@ -399,12 +714,13 @@ class FacilityService:
         tags: Optional[Dict[str, Any]] = None,
         limit: int = 15,
         region_id: str = "ru-spb",
-        which_result: Optional[int] = None
+        which_result: Optional[int] = None,
+        use_rules_64: bool = True,
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM по названию территории с умной фильтрацией.
         """
-        query_tags = tags or self.DEFAULT_OSM_TAGS
+        query_tags = tags or (self.WAREHOUSE_OSM_TAGS if use_rules_64 else self.DEFAULT_OSM_TAGS)
 
         print(f"[*] Поиск логистических объектов в OSM для: '{place_name}'...")
         try:
@@ -420,9 +736,14 @@ class FacilityService:
             print(f"[-] Ошибка при запросе к OSM Overpass API: {e}")
             return []
 
-        if gdf.empty:
+        if gdf is None or getattr(gdf, "empty", True):
             print("[-] Подходящих объектов в указанной локации не найдено.")
             return []
+
+        if use_rules_64:
+            nodes, audit = self.select_warehouse_nodes_from_gdf(gdf, limit=limit, region_id=region_id)
+            print(f"[+] Из OSM по правилам #64 отобрано {len(nodes)} складов (всего проверено объектов: {len(audit)}).")
+            return nodes
 
         return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
 
