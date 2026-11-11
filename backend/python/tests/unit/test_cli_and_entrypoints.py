@@ -57,6 +57,18 @@ class TestCliAndEntrypoints(unittest.TestCase):
         self.assertEqual(res_comp_env.payload["status"], "completed")
         self.assertGreater(len(res_comp_env.payload["graph"]["nodes"]), 0)
 
+        # 3.1. RESULT road graph (Спринт 4)
+        road_graph_file = os.path.join(data_dir, "example_road_graph_response.json")
+        self.assertTrue(os.path.exists(road_graph_file))
+        with open(road_graph_file, "r", encoding="utf-8") as f:
+            road_graph_data = json.load(f)
+        road_graph_env = KafkaEnvelope.from_dict(road_graph_data)
+        self.assertEqual(road_graph_env.type, "RESULT")
+        self.assertEqual(road_graph_env.payload["status"], "completed")
+        self.assertGreater(len(road_graph_env.payload["graph"]["nodes"]), 0)
+        self.assertGreater(len(road_graph_env.payload["graph"]["edges"]), 0)
+        self.assertGreater(len(road_graph_env.payload["metrics"]), 0)
+
         # 4. RESULT failed
         res_fail_file = os.path.join(data_dir, "example_kafka_result_failed.json")
         self.assertTrue(os.path.exists(res_fail_file))
