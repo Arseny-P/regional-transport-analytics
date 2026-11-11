@@ -182,11 +182,7 @@ func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 			return
 		}
 		if isCreated {
-			updateErr := hc.heartbeatWorker.UpdateHeartbeat(jobID, time.Now(), time.Now().Add(10*time.Second))
-			if updateErr != nil {
-				hc.writeError(w, updateErr)
-				return
-			}
+			_ = hc.heartbeatWorker.UpdateHeartbeat(jobID, time.Now(), time.Now().Add(10*time.Second))
 		}
 
 		resp := httpdto.AnalysisReceipt{
