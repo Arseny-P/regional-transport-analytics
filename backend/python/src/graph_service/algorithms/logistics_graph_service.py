@@ -846,12 +846,17 @@ class LogisticsGraphService:
                 )
 
             edge_id = f"road_{u}_{v}_{k}"
+            u_str, v_str = str(u), str(v)
+            sorted_ends = sorted([u_str, v_str])
+            k_suffix = f"_{k}" if k not in (0, "0", None) else ""
+            segment_id = f"seg_{sorted_ends[0]}_{sorted_ends[1]}{k_suffix}"
 
             route_graph.add_edge(
                 str(u),
                 str(v),
                 key=k,
                 id=edge_id,
+                segment_id=segment_id,
                 edge_type="road",
                 length_m=round(length_m, 2),
                 geometry=geom,

@@ -104,6 +104,7 @@ class TestSerializerRoadGraph(unittest.TestCase):
         conn = edge_map["conn_W1_100"]
         self.assertEqual(conn.source, "W1")
         self.assertEqual(conn.target, "100")
+        self.assertIsNone(conn.segment_id)
         self.assertEqual(conn.attributes["edge_type"], "access_connector")
         self.assertEqual(conn.attributes["length_m"], 45.5)
         self.assertEqual(conn.geometry, [[29.98, 60.01], [29.99, 60.01]])
@@ -113,6 +114,7 @@ class TestSerializerRoadGraph(unittest.TestCase):
         road = edge_map["road_100_200_0"]
         self.assertEqual(road.source, "100")
         self.assertEqual(road.target, "200")
+        self.assertEqual(road.segment_id, "seg_100_200")
         self.assertEqual(road.attributes["edge_type"], "road")
         self.assertEqual(road.attributes["length_m"], 1250.0)
         self.assertEqual(road.attributes["routes_count"], 3)
@@ -126,6 +128,30 @@ class TestSerializerRoadGraph(unittest.TestCase):
         payload_dict = payload.to_dict()
         self.assertIn("nodes", payload_dict)
         self.assertIn("edges", payload_dict)
+
+        # Проверка наличия/отсутствия segment_id в словаре ребер
+        edge_dict_map = {e["id"]: e for e in payload_dict["edges"]}
+        self.assertNotIn("segment_id", edge_dict_map["conn_W1_100"])
+        self.assertEqual(edge_dict_map["road_100_200_0"]["segment_id"], "seg_100_200")
+
+    def test_segment_id_identical_for_both_directions(self):
+        """
+        Проверяет, что у двух направлений одного физического участка (u -> v и v -> u)
+        значение segment_id строго одинаковое.
+        """
+        graph = nx.MultiDiGraph()
+        graph.add_node("A", x=30.0, y=60.0)
+        graph.add_node("B", x=30.1, y=60.1)
+
+        graph.add_edge("A", "B", key=0, edge_type="road", id="road_A_B_0")
+        graph.add_edge("B", "A", key=0, edge_type="road", id="road_B_A_0")
+
+        payload = GraphSerializer.serialize(graph)
+        edge_dict = {e.id: e for e in payload.edges}
+
+        self.assertEqual(edge_dict["road_A_B_0"].segment_id, "seg_A_B")
+        self.assertEqual(edge_dict["road_B_A_0"].segment_id, "seg_A_B")
+        self.assertEqual(edge_dict["road_A_B_0"].segment_id, edge_dict["road_B_A_0"].segment_id)
 
 
 if __name__ == "__main__":

@@ -140,11 +140,23 @@ class GraphSerializer:
                     if str_attr in data and data[str_attr]:
                         edge_attrs[str_attr] = data[str_attr]
 
+            # segment_id: у двух направлений одного физического участка дорог значение одинаковое.
+            # У access_connector поле отсутствует.
+            segment_id = data.get("segment_id")
+            if not segment_id and data.get("edge_type") == "road":
+                u_str, v_str = str(u), str(v)
+                sorted_ends = sorted([u_str, v_str])
+                k_suffix = f"_{k}" if k not in (0, "0", None) else ""
+                segment_id = f"seg_{sorted_ends[0]}_{sorted_ends[1]}{k_suffix}"
+            elif data.get("edge_type") == "access_connector":
+                segment_id = None
+
             edges.append(
                 EdgePayload(
                     id=edge_id,
                     source=str(u),
                     target=str(v),
+                    segment_id=segment_id,
                     geometry=geom_coords,
                     attributes=edge_attrs,
                 )
