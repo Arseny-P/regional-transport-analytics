@@ -536,33 +536,434 @@ class LogisticsGraphService:
 
         return routes
 
-    def save_graphml(self, log_graph: nx.MultiGraph, filename: str) -> str:
+    def build_route_road_graph(
+        self,
+        road_graph: nx.MultiDiGraph,
+        nodes: List[Union[LogisticsNode, Dict[str, Any]]],
+        routes: Optional[List[RouteDetail]] = None,
+        k_neighbors: Optional[int] = None,
+    ) -> nx.MultiDiGraph:
         """
-        Сохраняет логистический MultiGraph в GraphML.
-        Конвертирует None в пустые строки для совместимости со схемой GraphML.
+        Формирует единый дорожный граф маршрутов:
+        1. Вершины:
+           - Все склады (facility / warehouse), включая изолированные без найденных маршрутов.
+           - Дорожные узлы (перекрёстки 'intersection' и промежуточные 'road_node'),
+             входящие хотя бы в один найденный маршрут или являющиеся точками привязки.
+        2. Рёбра:
+           - Дорожные сегменты ('road'): уникальные направленные сегменты (u, v, key),
+             попавшие хотя бы в один найденный маршрут (с дедупликацией и счетчиком routes_count).
+           - Подъездные коннекторы ('access_connector'): связи склад -> дорожный узел и дорожный узел -> склад.
+        3. Метаданные:
+           - Сведения о найденных маршрутах сохраняются в атрибуте graph["routes"].
         """
-        clean_graph = nx.MultiGraph()
-        clean_graph.graph.update(log_graph.graph)
+        import osmnx as ox
+
+        # 1. Нормализация списка складов
+        warehouses: Dict[str, LogisticsNode] = {}
+        for n in nodes:
+            if isinstance(n, LogisticsNode):
+                warehouses[n.id] = n
+            else:
+                w_id = str(n["id"])
+                warehouses[w_id] = LogisticsNode(
+                    id=w_id,
+                    name=str(n.get("name") or w_id),
+                    object_type=str(n.get("object_type") or n.get("type", "facility")),
+                    latitude=float(n.get("latitude") or n.get("lat")),
+                    longitude=float(n.get("longitude") or n.get("lon")),
+                    nearest_osm_node=n.get("nearest_osm_node"),
+                    snap_distance_m=n.get("snap_distance_m"),
+                    access_nodes=n.get("access_nodes", []),
+                    is_isolated=bool(n.get("is_isolated", False)),
+                )
+
+        # 2. Если маршруты не переданы извне, рассчитываем их
+        if routes is None:
+            routes = self.calculate_all_routes(
+                road_graph=road_graph,
+                nodes=list(warehouses.values()),
+                k_neighbors=k_neighbors,
+            )
+
+        route_graph = nx.MultiDiGraph()
+        route_graph.graph["crs"] = "epsg:4326"
+        route_graph.graph["routes"] = [r.to_dict() for r in routes]
+        route_graph.graph["total_routes"] = len(routes)
+        route_graph.graph["found_routes"] = sum(1 for r in routes if r.status == RouteStatus.FOUND.value)
+
+        # 3. Сбор статистики использования дорожных узлов и сегментов
+        connected_warehouses = set()
+        used_road_nodes = set()
+        road_segment_usage: Dict[Tuple[int, int, Any], Dict[str, Any]] = {}
+        connectors_to_add: Dict[Tuple[str, str, str], Dict[str, Any]] = {}
+
+        for r in routes:
+            if r.status != RouteStatus.FOUND.value:
+                continue
+
+            connected_warehouses.add(r.origin_id)
+            connected_warehouses.add(r.destination_id)
+
+            for n in r.node_path:
+                used_road_nodes.add(n)
+            if r.access_u is not None:
+                used_road_nodes.add(r.access_u)
+            if r.access_v is not None:
+                used_road_nodes.add(r.access_v)
+
+            # Направленные дорожные сегменты (u, v, key)
+            for u, v, k in r.edge_keys:
+                seg_key = (u, v, k)
+                if seg_key not in road_segment_usage:
+                    road_segment_usage[seg_key] = {
+                        "routes": [],
+                        "count": 0,
+                    }
+                road_segment_usage[seg_key]["count"] += 1
+                road_segment_usage[seg_key]["routes"].append(f"{r.origin_id}->{r.destination_id}")
+
+            # Подъездные коннекторы (access_connector)
+            # Отправление: склад -> дорожный узел
+            if r.access_u is not None:
+                c_out_key = (r.origin_id, str(r.access_u), "access_out")
+                if c_out_key not in connectors_to_add:
+                    connectors_to_add[c_out_key] = {
+                        "source": r.origin_id,
+                        "target": str(r.access_u),
+                        "key": "access_out",
+                        "edge_type": "access_connector",
+                        "length_m": r.snap_origin_m,
+                        "warehouse_id": r.origin_id,
+                        "road_node_id": str(r.access_u),
+                        "direction": "origin_to_road",
+                        "routes_count": 0,
+                    }
+                connectors_to_add[c_out_key]["routes_count"] += 1
+
+            # Прибытие: дорожный узел -> склад
+            if r.access_v is not None:
+                c_in_key = (str(r.access_v), r.destination_id, "access_in")
+                if c_in_key not in connectors_to_add:
+                    connectors_to_add[c_in_key] = {
+                        "source": str(r.access_v),
+                        "target": r.destination_id,
+                        "key": "access_in",
+                        "edge_type": "access_connector",
+                        "length_m": r.snap_dest_m,
+                        "warehouse_id": r.destination_id,
+                        "road_node_id": str(r.access_v),
+                        "direction": "road_to_dest",
+                        "routes_count": 0,
+                    }
+                connectors_to_add[c_in_key]["routes_count"] += 1
+
+        # 4. Добавляем склады в граф (включая изолированные)
+        for w_id, w in warehouses.items():
+            is_isolated = (w_id not in connected_warehouses)
+            obj_type = w.object_type if w.object_type in ("warehouse", "terminal", "port", "facility") else "warehouse"
+            route_graph.add_node(
+                str(w_id),
+                name=w.name,
+                object_type=obj_type,
+                latitude=w.latitude,
+                longitude=w.longitude,
+                x=w.longitude,
+                y=w.latitude,
+                is_isolated=is_isolated,
+                snap_distance_m=w.snap_distance_m if w.snap_distance_m is not None else 0.0,
+                nearest_osm_node=w.nearest_osm_node,
+                region_ids=",".join(w.region_ids) if isinstance(w.region_ids, list) else str(w.region_ids),
+            )
+
+        # 5. Добавляем дорожные узлы в граф
+        for n in used_road_nodes:
+            if n not in road_graph.nodes:
+                continue
+            data = road_graph.nodes[n]
+            x = float(data.get("x", 0.0))
+            y = float(data.get("y", 0.0))
+
+            street_count = data.get("street_count")
+            if street_count is not None:
+                is_intersection = (street_count >= 3)
+            else:
+                deg = road_graph.in_degree(n) + road_graph.out_degree(n)
+                is_intersection = (deg >= 3)
+
+            # Виртуальные врезанные узлы (ID >= 9_000_000_000) классифицируются как road_node
+            if isinstance(n, int) and n >= 9_000_000_000:
+                is_intersection = False
+
+            node_type = "intersection" if is_intersection else "road_node"
+
+            route_graph.add_node(
+                str(n),
+                name=f"{node_type}_{n}",
+                object_type=node_type,
+                latitude=y,
+                longitude=x,
+                x=x,
+                y=y,
+                street_count=street_count if street_count is not None else (road_graph.in_degree(n) + road_graph.out_degree(n)),
+                highway=data.get("highway", ""),
+            )
+
+        # 6. Добавляем дорожные рёбра (уникальные направленные сегменты)
+        for (u, v, k), usage in road_segment_usage.items():
+            if not road_graph.has_edge(u, v, k):
+                continue
+            edge_data = road_graph[u][v][k]
+            geom = edge_data.get("geometry")
+            if geom is None or not isinstance(geom, LineString):
+                p1 = (float(road_graph.nodes[u]["x"]), float(road_graph.nodes[u]["y"]))
+                p2 = (float(road_graph.nodes[v]["x"]), float(road_graph.nodes[v]["y"]))
+                geom = LineString([p1, p2])
+
+            length_m = float(edge_data.get("length", 0.0))
+            if length_m <= 0.0 and len(geom.coords) >= 2:
+                length_m = ox.distance.great_circle(
+                    geom.coords[0][1], geom.coords[0][0], geom.coords[-1][1], geom.coords[-1][0]
+                )
+
+            edge_id = f"road_{u}_{v}_{k}"
+
+            route_graph.add_edge(
+                str(u),
+                str(v),
+                key=k,
+                id=edge_id,
+                edge_type="road",
+                length_m=round(length_m, 2),
+                geometry=geom,
+                geometry_wkt=geom.wkt,
+                routes_count=usage["count"],
+                route_ids=usage["routes"],
+                highway=str(edge_data.get("highway", "road")),
+                name=str(edge_data.get("name", "")),
+                maxspeed=str(edge_data.get("maxspeed", "")),
+                oneway=bool(edge_data.get("oneway", False)),
+                transport_mode="road",
+            )
+
+        # 7. Добавляем коннекторы последней мили (access_connector)
+        for (src, dst, c_key), c_info in connectors_to_add.items():
+            if src not in route_graph.nodes or dst not in route_graph.nodes:
+                continue
+            src_node = route_graph.nodes[src]
+            dst_node = route_graph.nodes[dst]
+            geom = LineString([
+                (float(src_node["x"]), float(src_node["y"])),
+                (float(dst_node["x"]), float(dst_node["y"])),
+            ])
+            conn_id = f"conn_{src}_{dst}_{c_key}"
+
+            route_graph.add_edge(
+                src,
+                dst,
+                key=c_key,
+                id=conn_id,
+                edge_type="access_connector",
+                length_m=round(float(c_info.get("length_m") or 0.0), 2),
+                geometry=geom,
+                geometry_wkt=geom.wkt,
+                routes_count=c_info["routes_count"],
+                warehouse_id=c_info["warehouse_id"],
+                road_node_id=c_info["road_node_id"],
+                direction=c_info["direction"],
+                transport_mode="road",
+            )
+
+        print(
+            f"[+] Итоговый дорожный граф маршрутов сформирован: "
+            f"{len(route_graph.nodes)} вершин ({sum(1 for _, d in route_graph.nodes(data=True) if d.get('object_type') in ('warehouse', 'facility'))} складов, "
+            f"{sum(1 for _, d in route_graph.nodes(data=True) if d.get('object_type') == 'intersection')} перекрёстков, "
+            f"{sum(1 for _, d in route_graph.nodes(data=True) if d.get('object_type') == 'road_node')} узлов дорог), "
+            f"{len(route_graph.edges)} рёбер ({sum(1 for _, _, _, d in route_graph.edges(keys=True, data=True) if d.get('edge_type') == 'road')} дорожных, "
+            f"{sum(1 for _, _, _, d in route_graph.edges(keys=True, data=True) if d.get('edge_type') == 'access_connector')} коннекторов)."
+        )
+        return route_graph
+
+    def get_route_road_graph_summary(self, route_graph: nx.MultiDiGraph) -> Dict[str, Any]:
+        """
+        Возвращает детальную статистику по дорожному графу маршрутов.
+        """
+        warehouses = 0
+        intersections = 0
+        road_nodes = 0
+        isolated_warehouses = 0
+
+        for _, d in route_graph.nodes(data=True):
+            obj_type = d.get("object_type")
+            if obj_type in ("warehouse", "facility", "terminal", "port"):
+                warehouses += 1
+                if d.get("is_isolated"):
+                    isolated_warehouses += 1
+            elif obj_type == "intersection":
+                intersections += 1
+            else:
+                road_nodes += 1
+
+        road_edges = 0
+        connectors = 0
+        total_road_length_m = 0.0
+
+        for _, _, _, d in route_graph.edges(keys=True, data=True):
+            e_type = d.get("edge_type")
+            if e_type == "access_connector":
+                connectors += 1
+            else:
+                road_edges += 1
+                total_road_length_m += float(d.get("length_m") or 0.0)
+
+        return {
+            "total_nodes": len(route_graph.nodes),
+            "total_edges": len(route_graph.edges),
+            "warehouses_count": warehouses,
+            "intersections_count": intersections,
+            "road_nodes_count": road_nodes,
+            "isolated_warehouses_count": isolated_warehouses,
+            "road_segments_count": road_edges,
+            "access_connectors_count": connectors,
+            "total_road_length_km": round(total_road_length_m / 1000.0, 3),
+            "total_routes": route_graph.graph.get("total_routes", 0),
+            "found_routes": route_graph.graph.get("found_routes", 0),
+        }
+
+    def export_route_road_graph_to_geojson(self, route_graph: nx.MultiDiGraph, filename: str) -> str:
+        """
+        Экспортирует дорожный граф маршрутов в GeoJSON для Frontend:
+        - Склады, перекрёстки, промежуточные узлы (точки)
+        - Дорожные сегменты и подъездные коннекторы (линии)
+        """
+        filepath = os.path.join(self.storage_dir, f"{filename}.geojson")
+        features = []
+
+        # Вершины
+        for node_id, data in route_graph.nodes(data=True):
+            x = float(data.get("x") or data.get("lon") or 0.0)
+            y = float(data.get("y") or data.get("lat") or 0.0)
+            pt_geom = Point(x, y)
+
+            props = {
+                "id": str(node_id),
+                "name": data.get("name", str(node_id)),
+                "object_type": data.get("object_type", "road_node"),
+            }
+            for k in ("is_isolated", "snap_distance_m", "street_count", "highway"):
+                if k in data and data[k] is not None:
+                    props[k] = data[k]
+
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(pt_geom),
+                "properties": props,
+            })
+
+        # Рёбра
+        for u, v, k, data in route_graph.edges(keys=True, data=True):
+            geom = data.get("geometry")
+            if geom is None or not isinstance(geom, LineString):
+                u_node = route_graph.nodes[u]
+                v_node = route_graph.nodes[v]
+                geom = LineString([
+                    (float(u_node.get("x", 0.0)), float(u_node.get("y", 0.0))),
+                    (float(v_node.get("x", 0.0)), float(v_node.get("y", 0.0))),
+                ])
+
+            props = {
+                "id": data.get("id", f"e_{u}_{v}_{k}"),
+                "source": str(u),
+                "target": str(v),
+                "key": str(k),
+                "edge_type": data.get("edge_type", "road"),
+                "length_m": data.get("length_m"),
+                "routes_count": data.get("routes_count", 1),
+            }
+            for attr in ("highway", "name", "oneway", "maxspeed", "warehouse_id", "road_node_id", "direction"):
+                if attr in data and data[attr] is not None:
+                    props[attr] = data[attr]
+
+            features.append({
+                "type": "Feature",
+                "geometry": mapping(geom),
+                "properties": props,
+            })
+
+        fc = {
+            "type": "FeatureCollection",
+            "features": features,
+            "metadata": {
+                "total_nodes": len(route_graph.nodes),
+                "total_edges": len(route_graph.edges),
+                "total_routes": route_graph.graph.get("total_routes", 0),
+                "found_routes": route_graph.graph.get("found_routes", 0),
+            }
+        }
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(fc, f, ensure_ascii=False, indent=2)
+
+        print(f"[+] Дорожный граф маршрутов экспортирован в GeoJSON: {filepath} ({len(features)} фичей)")
+        return filepath
+
+    def save_graphml(self, log_graph: Union[nx.MultiGraph, nx.MultiDiGraph], filename: str) -> str:
+        """
+        Сохраняет граф (MultiGraph или MultiDiGraph) в GraphML.
+        Конвертирует None в пустые строки и объекты в JSON/WKT для совместимости со схемой GraphML.
+        """
+        clean_graph = nx.MultiDiGraph() if isinstance(log_graph, (nx.MultiDiGraph, nx.DiGraph)) else nx.MultiGraph()
+        clean_graph.graph.update({
+            k: ("" if v is None else json.dumps(v, ensure_ascii=False) if isinstance(v, (list, dict)) else str(v) if not isinstance(v, (int, float, str, bool)) else v)
+            for k, v in log_graph.graph.items()
+        })
+
         for n, data in log_graph.nodes(data=True):
-            clean_graph.add_node(n, **{k: ("" if v is None else v) for k, v in data.items()})
+            clean_attrs = {}
+            for k, v in data.items():
+                if v is None:
+                    clean_attrs[k] = ""
+                elif isinstance(v, (list, dict)):
+                    clean_attrs[k] = json.dumps(v, ensure_ascii=False)
+                elif hasattr(v, "wkt"):
+                    clean_attrs[k] = v.wkt
+                elif not isinstance(v, (int, float, str, bool)):
+                    clean_attrs[k] = str(v)
+                else:
+                    clean_attrs[k] = v
+            clean_graph.add_node(n, **clean_attrs)
+
         for u, v, k, data in log_graph.edges(keys=True, data=True):
-            clean_graph.add_edge(u, v, key=k, **{attr: ("" if val is None else val) for attr, val in data.items()})
+            clean_attrs = {}
+            for attr, val in data.items():
+                if val is None:
+                    clean_attrs[attr] = ""
+                elif isinstance(val, (list, dict)):
+                    clean_attrs[attr] = json.dumps(val, ensure_ascii=False)
+                elif hasattr(val, "wkt"):
+                    clean_attrs[attr] = val.wkt
+                elif attr == "geometry":
+                    continue
+                elif not isinstance(val, (int, float, str, bool)):
+                    clean_attrs[attr] = str(val)
+                else:
+                    clean_attrs[attr] = val
+            clean_graph.add_edge(u, v, key=k, **clean_attrs)
 
         filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
         nx.write_graphml(clean_graph, filepath)
-        print(f"[+] Логистический MultiGraph сохранен в GraphML: {filepath}")
+        print(f"[+] Граф сохранен в GraphML: {filepath}")
         return filepath
 
-    def load_graphml(self, filename: str) -> nx.MultiGraph:
+    def load_graphml(self, filename: str) -> Union[nx.MultiGraph, nx.MultiDiGraph]:
         """
-        Загружает логистический MultiGraph из файла GraphML.
+        Загружает граф из файла GraphML.
         """
         filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
         if not os.path.exists(filepath):
             raise FileNotFoundError(f"Файл {filepath} не найден!")
 
         graph = nx.read_graphml(filepath)
-        print(f"[+] Логистический MultiGraph загружен из GraphML: {len(graph.nodes)} узлов, {len(graph.edges)} связей.")
+        print(f"[+] Граф загружен из GraphML: {len(graph.nodes)} узлов, {len(graph.edges)} связей.")
         return graph
 
     def export_to_geojson(self, log_graph: nx.MultiGraph, filename: str) -> str:
