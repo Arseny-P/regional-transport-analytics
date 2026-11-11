@@ -1007,8 +1007,6 @@ class FacilityService:
                                 best_lon = float(road_graph.nodes[u_cand]["x"])
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
                                 access_pool = [u_cand]
-                                if v_cand in road_graph and v_cand != u_cand:
-                                    access_pool.append(v_cand)
                                 split_succeeded = True
                                 snap_kind = "osm_node"
                             elif dist_to_v < 8.0:
@@ -1018,8 +1016,6 @@ class FacilityService:
                                 best_lon = float(road_graph.nodes[v_cand]["x"])
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
                                 access_pool = [v_cand]
-                                if u_cand in road_graph and u_cand != v_cand:
-                                    access_pool.append(u_cand)
                                 split_succeeded = True
                                 snap_kind = "osm_node"
                             else:
@@ -1032,12 +1028,22 @@ class FacilityService:
                                     best_lon = proj_lon
                                     best_dist = proj_dist_m
                                     access_pool = [virtual_id]
-                                    if u_cand in road_graph and u_cand != virtual_id:
-                                        access_pool.append(u_cand)
-                                    if v_cand in road_graph and v_cand != virtual_id:
-                                        access_pool.append(v_cand)
                                     split_succeeded = True
                                     snap_kind = "virtual_node"
+
+                            # Не добавляем дальние концы ребра u и v в access_nodes как прямые коннекторы:
+                            # выезд на дорожное полотно происходит в точке врезки virtual_id, а далее
+                            # движение идет по дороге. Добавляем в access_nodes только независимые перекрёстки
+                            # с соседних улиц, если они строго укладываются в max_snap_distance_m.
+                            if split_succeeded and primary_id_native not in access_pool and primary_id_native in road_graph.nodes:
+                                if primary_id_native not in (u_cand, v_cand):
+                                    p_data = road_graph.nodes[primary_id_native]
+                                    dist_primary = ox.distance.great_circle(
+                                        node.latitude, node.longitude,
+                                        float(p_data["y"]), float(p_data["x"])
+                                    )
+                                    if max_snap_distance_m is None or dist_primary <= max_snap_distance_m:
+                                        access_pool.append(primary_id_native)
 
             # 2. Если врезка не удалась — резервный выбор из перекрёстков-кандидатов с защитой от тупиков
             if not split_succeeded:

@@ -147,8 +147,10 @@ class TestWarehouseSnappingStage2(unittest.TestCase):
 
     def test_multiple_access_options_on_edge_split(self):
         """
-        Проверяет, что при врезке в ребро виртуальный узел становится основным,
-        а смежные дорожные узлы u и v добавляются как альтернативные варианты (access_nodes).
+        Проверяет, что при врезке в ребро:
+        - виртуальный узел становится точкой подключения (snap_kind='virtual_node')
+        - дальние концы ребра u и v (более 250м) НЕ добавляются в access_nodes как прямые коннекторы
+        - независимый перекрёсток на соседней улице в пределах max_snap_distance_m может быть добавлен
         """
         G = nx.MultiDiGraph()
         G.graph["crs"] = "epsg:4326"
@@ -157,23 +159,64 @@ class TestWarehouseSnappingStage2(unittest.TestCase):
         G.add_edge(1, 2, key=0, length=1000)
         G.add_edge(2, 1, key=0, length=1000)
 
-        # Кольцо связности
+        # Кольцо связности (далекий узел 3, ~1000м)
         G.add_node(3, x=30.01, y=59.01)
         G.add_edge(1, 3, key=0, length=600)
         G.add_edge(3, 2, key=0, length=600)
 
-        # Склад посередине улицы (1, 2)
+        # Склад посередине улицы (1, 2): удаление до полотна дороги ~111 м, а до узлов 1 и 2 ~580 м
         w = LogisticsNode(id="w_mid", name="Склад посреди улицы", object_type="warehouse", latitude=59.001, longitude=30.01)
-        snapped = self.facility_service.snap_to_road_network(G, [w], filter_disconnected=False)
+        snapped = self.facility_service.snap_to_road_network(G, [w], filter_disconnected=False, max_snap_distance_m=250.0)
 
         node = snapped[0]
         self.assertEqual(node.snap_kind, "virtual_node")
         self.assertGreaterEqual(node.nearest_osm_node, 9_000_000_000)
-        # В access_nodes должен быть не только виртуальный узел, но и исходные узлы 1 и 2
         self.assertIn(node.nearest_osm_node, node.access_nodes)
-        self.assertIn(1, node.access_nodes)
-        self.assertIn(2, node.access_nodes)
-        self.assertGreaterEqual(len(node.access_nodes), 3)
+
+        # Дальние узлы 1 и 2 (580м > 250м) не должны попадать в access_nodes
+        self.assertNotIn(1, node.access_nodes)
+        self.assertNotIn(2, node.access_nodes)
+
+    def test_routing_traverses_road_and_prevents_distant_access_connector_bypass(self):
+        """
+        Проверяет замечание код-ревью:
+        При маршрутизации от склада посреди улицы к другому складу на перекрестке 2
+        маршрут ОБЯЗАН проходить по реальному дорожному полотну [virt_node, 2],
+        а не перепрыгивать напрямую через прямой access_connector склад->2 в обход дороги.
+        """
+        from graph_service.algorithms.logistics_graph_service import LogisticsGraphService
+
+        G = nx.MultiDiGraph()
+        G.graph["crs"] = "epsg:4326"
+        G.add_node(1, x=30.0, y=59.0)
+        G.add_node(2, x=30.02, y=59.0)
+        G.add_edge(1, 2, key=0, length=1000.0)
+        G.add_edge(2, 1, key=0, length=1000.0)
+
+        w1 = LogisticsNode(id="W1", name="Склад посередине", object_type="warehouse", latitude=59.0005, longitude=30.01)
+        w2 = LogisticsNode(id="W2", name="Склад на востоке", object_type="warehouse", latitude=59.0005, longitude=30.02)
+
+        snapped = self.facility_service.snap_to_road_network(G, [w1, w2], filter_disconnected=False, max_snap_distance_m=250.0)
+        w1_snapped, w2_snapped = snapped[0], snapped[1]
+
+        virt_node = w1_snapped.nearest_osm_node
+        self.assertGreaterEqual(virt_node, 9_000_000_000)
+
+        log_service = LogisticsGraphService()
+        res = log_service._calculate_best_route(
+            road_graph=G,
+            start_nodes=w1_snapped.access_nodes,
+            end_nodes=w2_snapped.access_nodes,
+            origin_coords=(w1.longitude, w1.latitude),
+            dest_coords=(w2.longitude, w2.latitude),
+        )
+
+        self.assertEqual(res["status"], "found")
+        # Маршрут должен начинаться в точке врезки virt_node и идти по дороге в узел 2
+        self.assertEqual(res["access_u"], virt_node)
+        self.assertIn(virt_node, res["path"])
+        self.assertEqual(res["path"][0], virt_node)
+        self.assertEqual(res["path"][-1], w2_snapped.nearest_osm_node)
 
 
 if __name__ == "__main__":
