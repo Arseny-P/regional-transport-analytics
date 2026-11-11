@@ -161,6 +161,7 @@ class LogisticsNode:
             "osm_node_lat": self.osm_node_lat,
             "osm_node_lon": self.osm_node_lon,
             "snap_distance_m": self.snap_distance_m,
+            "snap_kind": self.snap_kind,
             "access_nodes": self.access_nodes,
             "is_isolated": self.is_isolated,
             "isolation_reason": self.isolation_reason,
