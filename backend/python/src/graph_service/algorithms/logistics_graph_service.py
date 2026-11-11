@@ -844,10 +844,14 @@ class LogisticsGraphService:
             y = float(data.get("y") or data.get("lat") or 0.0)
             pt_geom = Point(x, y)
 
+            obj_type = data.get("object_type", "road_node")
+            feature_type = "logistics_hub" if obj_type in ("warehouse", "facility", "terminal", "port") else obj_type
+
             props = {
                 "id": str(node_id),
                 "name": data.get("name", str(node_id)),
-                "object_type": data.get("object_type", "road_node"),
+                "object_type": obj_type,
+                "feature_type": feature_type,
             }
             for k in ("is_isolated", "snap_distance_m", "street_count", "highway"):
                 if k in data and data[k] is not None:
@@ -870,12 +874,18 @@ class LogisticsGraphService:
                     (float(v_node.get("x", 0.0)), float(v_node.get("y", 0.0))),
                 ])
 
+            edge_type = data.get("edge_type", "road")
+            feature_type = "transport_route" if edge_type == "road" else "access_connector"
+
             props = {
                 "id": data.get("id", f"e_{u}_{v}_{k}"),
                 "source": str(u),
                 "target": str(v),
                 "key": str(k),
-                "edge_type": data.get("edge_type", "road"),
+                "edge_type": edge_type,
+                "feature_type": feature_type,
+                "is_strictly_road": (edge_type == "road"),
+                "road_distance_m": data.get("length_m", 0.0),
                 "length_m": data.get("length_m"),
                 "routes_count": data.get("routes_count", 1),
             }
