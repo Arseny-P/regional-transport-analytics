@@ -1,4 +1,3 @@
-import { Button } from '@/shared/ui';
 import styles from './NodeCard.module.css';
 
 type NodeKind = 'warehouse' | 'intersection';
@@ -34,7 +33,14 @@ export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
     <section className={styles.card} aria-label={`Карточка: ${title}`}>
       <div className={styles.header}>
         <h3>{title}</h3>
-        <Button onClick={onClose}>Закрыть</Button>
+        <button 
+          type="button"
+          className={styles.closeButton}
+          aria-label="Закрыть"
+          onClick={onClose}
+        >
+          x
+        </button>
       </div>
 
       <p className={styles.details}>

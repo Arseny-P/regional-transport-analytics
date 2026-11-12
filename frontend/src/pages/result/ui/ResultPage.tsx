@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from 'react';
+import { Popup } from 'react-leaflet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
@@ -52,6 +53,7 @@ function JobResult({ jobId }: { jobId: string }) {
   const graph = result?.graph;
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
   const degree = selectedNode?.attributes?.degree;
+  const popupPosition: [number, number] | null = selectedNode ? [selectedNode.position[1], selectedNode.position[0]] : null;
   const notFound = requestError instanceof ApiError && requestError.status === 404;
   const isFinal = !!job && isFinalState(job.status);
   const isWaiting = !notFound && !graph && !isFinal;
@@ -100,13 +102,7 @@ function JobResult({ jobId }: { jobId: string }) {
           </tbody>
         </table>
 
-         {selectedNode && (
-          <NodeCard node={{ id: selectedNode.id }} metrics={[
-            { id: 'degree', label: 'Степень вершины', value: typeof degree === 'number' ? degree : null },
-          ]}
-          onClose={() => setSelectedNodeId(null)}
-          />
-      )}
+         
       </>
       ) : (
         <p className={styles.muted}>
@@ -122,7 +118,30 @@ function JobResult({ jobId }: { jobId: string }) {
 
   return (
     <ResultLayout sidebar={sidebar}>
-      <MapView>{graph && <GraphLayer graph={graph} colorBy={metric || undefined} onNodeHover={setSelectedNodeId} />}</MapView>
+      <MapView>
+        {graph && <GraphLayer graph={graph} colorBy={metric || undefined} onNodeHover={setSelectedNodeId} />}
+        {selectedNode && popupPosition && (
+          <Popup 
+            position={popupPosition}
+            offset={[0, -8]}
+            autoPan={false}
+            closeButton={false}
+            closeOnClick={false}
+          >
+          <NodeCard 
+            node={{ id: selectedNode.id }}
+            metrics={[
+              { 
+                id: 'degree', 
+                label: 'Степень вершины', 
+                value: typeof degree === 'number' ? degree : null
+              },
+          ]}
+          onClose={() => setSelectedNodeId(null)}
+          />
+          </Popup>
+        )}
+      </MapView>
       {isWaiting && (
         <div className={styles.overlay}>
           <Message
