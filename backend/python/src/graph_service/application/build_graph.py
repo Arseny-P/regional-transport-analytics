@@ -208,9 +208,25 @@ class TerritoryAnalysisService:
             cancellation_token.check_cancelled()
 
         # -----------------------------------------------------------------
-        # 5. Синтез логистического MultiGraph и расчет маршрутов
+        # 5. Синтез дорожного графа маршрутов и расчет маршрутов
         # -----------------------------------------------------------------
         try:
+            # 5.1. Расчет детальных маршрутов между парами складов
+            routes = logistics_service.calculate_all_routes(
+                road_graph=road_graph,
+                nodes=snapped_nodes,
+                k_neighbors=request.knn,
+            )
+
+            # 5.2. Синтез единого дорожного графа маршрутов (Спринт 4)
+            route_road_graph = logistics_service.build_route_road_graph(
+                road_graph=road_graph,
+                nodes=snapped_nodes,
+                routes=routes,
+                k_neighbors=request.knn,
+            )
+
+            # 5.3. Синтез логистического графа склад-склад (для сохранения обратной совместимости)
             log_graph = logistics_service.build_logistics_graph(
                 road_graph=road_graph,
                 snapped_nodes=snapped_nodes,
@@ -229,6 +245,8 @@ class TerritoryAnalysisService:
         # -----------------------------------------------------------------
         artifacts: Dict[str, Optional[str]] = {
             "road_graphml": road_graph_path if os.path.exists(road_graph_path) else None,
+            "route_road_graphml": None,
+            "route_road_geojson": None,
             "logistics_graphml": None,
             "logistics_geojson": None,
         }
@@ -236,6 +254,13 @@ class TerritoryAnalysisService:
         geojson_payload: Optional[Dict[str, Any]] = None
 
         if request.save_artifacts:
+            # Экспорт итогового дорожного графа маршрутов (Спринт 4)
+            route_graphml_file = logistics_service.save_graphml(log_graph=route_road_graph, filename=f"{alias_base}_route_roads")
+            route_geojson_file = logistics_service.export_route_road_graph_to_geojson(route_graph=route_road_graph, filename=f"{alias_base}_route_roads")
+            artifacts["route_road_graphml"] = route_graphml_file
+            artifacts["route_road_geojson"] = route_geojson_file
+
+            # Экспорт логистического графа склад-склад (для обратной совместимости)
             graphml_file = logistics_service.save_graphml(log_graph=log_graph, filename=logistics_alias)
             geojson_file = logistics_service.export_to_geojson(log_graph=log_graph, filename=logistics_alias)
             artifacts["logistics_graphml"] = graphml_file
@@ -246,9 +271,10 @@ class TerritoryAnalysisService:
                     geojson_payload = json.load(gf)
 
         # -----------------------------------------------------------------
-        # 7. Формирование структурированного ответа (Summary, Hubs, Connections)
+        # 7. Формирование структурированного ответа (Summary, Hubs, Connections, Routes)
         # -----------------------------------------------------------------
         graph_summary = logistics_service.get_summary(log_graph=log_graph)
+        road_subgraph_summary = logistics_service.get_route_road_graph_summary(route_graph=route_road_graph)
 
         hubs_data: List[Dict[str, Any]] = [node.to_dict() for node in snapped_nodes]
 
@@ -299,15 +325,25 @@ class TerritoryAnalysisService:
             warnings.append("Ни один маршрут между объектами не был найден в графе дорог.")
 
         elapsed = round(time.time() - start_time, 2)
+        snap_summary = facility_service.get_snap_summary(snapped_nodes)
 
         summary_data = {
             "total_road_nodes": len(road_graph.nodes),
             "total_road_edges": len(road_graph.edges),
             "total_hubs": len(snapped_nodes),
+            "connected_hubs_count": snap_summary.get("connected_count", 0),
+            "isolated_hubs_count": len(isolated_hubs),
+            "unique_snap_road_nodes": snap_summary.get("unique_primary_nodes", 0),
+            "avg_snap_distance_m": snap_summary.get("avg_snap_distance_m", 0.0),
+            "max_snap_distance_m": snap_summary.get("max_snap_distance_m", 0.0),
             "total_connections": len(connections_data),
             "connected_pairs_count": connected_pairs_count,
-            "isolated_hubs_count": len(isolated_hubs),
             "avg_route_distance_km": graph_summary.get("avg_route_distance_km", 0.0),
+            "route_graph_nodes": road_subgraph_summary["total_nodes"],
+            "route_graph_edges": road_subgraph_summary["total_edges"],
+            "route_graph_intersections": road_subgraph_summary["intersections_count"],
+            "route_graph_road_segments": road_subgraph_summary["road_segments_count"],
+            "route_graph_access_connectors": road_subgraph_summary["access_connectors_count"],
             "execution_time_sec": elapsed,
         }
 
@@ -318,9 +354,10 @@ class TerritoryAnalysisService:
             artifacts=artifacts,
             hubs=hubs_data,
             connections=connections_data,
+            routes=[r.to_dict() for r in routes],
             geojson=geojson_payload,
             warnings=warnings,
-            graph_object=log_graph,
+            graph_object=route_road_graph,
         )
 
 
