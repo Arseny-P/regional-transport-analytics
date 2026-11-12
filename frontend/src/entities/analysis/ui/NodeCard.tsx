@@ -34,7 +34,7 @@ export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
       <div className={styles.header}>
         <h3>{title}</h3>
         <button type="button" className={styles.closeButton} aria-label="Закрыть" onClick={onClose}>
-          x
+          ×
         </button>
       </div>
 

@@ -1,10 +1,6 @@
 /* Карточка выбранной вершины. */
 .card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
   background-color: var(--general-bg);
   color: var(--text-primary);
 }
