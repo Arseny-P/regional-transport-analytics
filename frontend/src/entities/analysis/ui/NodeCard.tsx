@@ -33,12 +33,7 @@ export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
     <section className={styles.card} aria-label={`Карточка: ${title}`}>
       <div className={styles.header}>
         <h3>{title}</h3>
-        <button 
-          type="button"
-          className={styles.closeButton}
-          aria-label="Закрыть"
-          onClick={onClose}
-        >
+        <button type="button" className={styles.closeButton} aria-label="Закрыть" onClick={onClose}>
           x
         </button>
       </div>
@@ -48,9 +43,7 @@ export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
       </p>
 
       {node.kind === 'warehouse' && node.connectionStatus && (
-        <p className={styles.details}>
-          Подключение: {node.connectionStatus}
-        </p>
+        <p className={styles.details}>Подключение: {node.connectionStatus}</p>
       )}
 
       {metrics.length > 0 ? (

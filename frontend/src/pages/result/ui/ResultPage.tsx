@@ -4,11 +4,17 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 // import { MetricSelect } from '@/features/select-metric';
-import { GraphLayer, isFinalState, METRIC_LABELS, useAnalysisJob, type JobState, NodeCard } from '@/entities/analysis';
+import {
+  GraphLayer,
+  isFinalState,
+  METRIC_LABELS,
+  useAnalysisJob,
+  type JobState,
+  NodeCard,
+} from '@/entities/analysis';
 import { ApiError } from '@/shared/api';
 import styles from './ResultPage.module.css';
 import { Button, Message, Spinner } from '@/shared/ui';
-
 
 const STATUS_LABELS: Record<JobState, string> = {
   queued: 'В очереди',
@@ -28,7 +34,6 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
       <h3 className={styles.title}>Результаты анализа</h3>
       {sidebar}
 
-     
       <Button className={styles.newAnalysisButton} onClick={() => navigate('/analysis')}>
         Новый анализ
       </Button>
@@ -47,13 +52,15 @@ function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const { status, result, requestError } = useAnalysisJob(jobId);
   const [metric] = useState('');
-  const [ selectedNodeId, setSelectedNodeId ] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const job = status ?? result;
   const graph = result?.graph;
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
   const degree = selectedNode?.attributes?.degree;
-  const popupPosition: [number, number] | null = selectedNode ? [selectedNode.position[1], selectedNode.position[0]] : null;
+  const popupPosition: [number, number] | null = selectedNode
+    ? [selectedNode.position[1], selectedNode.position[0]]
+    : null;
   const notFound = requestError instanceof ApiError && requestError.status === 404;
   const isFinal = !!job && isFinalState(job.status);
   const isWaiting = !notFound && !graph && !isFinal;
@@ -85,25 +92,24 @@ function JobResult({ jobId }: { jobId: string }) {
       <h4>Простые метрики графа:</h4>
       {result?.metrics.length ? (
         <>
-
-        <table className={styles.metricsTable}>
-          <thead>
-            <tr>
-              <th scope="col">Показатель</th>
-              <th scope="col">Значение</th>
-            </tr>
-          </thead>
-          <tbody> {result.metrics.map(({ name, value }) => (
-            <tr key={name}> 
-              <th scope="row">{METRIC_LABELS[name] ?? name}</th>
-              <td>{value ?? 'Не рассчитано'}</td>
-            </tr>
-          ))}
-          </tbody>
-        </table>
-
-         
-      </>
+          <table className={styles.metricsTable}>
+            <thead>
+              <tr>
+                <th scope="col">Показатель</th>
+                <th scope="col">Значение</th>
+              </tr>
+            </thead>
+            <tbody>
+              {' '}
+              {result.metrics.map(({ name, value }) => (
+                <tr key={name}>
+                  <th scope="row">{METRIC_LABELS[name] ?? name}</th>
+                  <td>{value ?? 'Не рассчитано'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
       ) : (
         <p className={styles.muted}>
           {isFinal
@@ -119,26 +125,28 @@ function JobResult({ jobId }: { jobId: string }) {
   return (
     <ResultLayout sidebar={sidebar}>
       <MapView>
-        {graph && <GraphLayer graph={graph} colorBy={metric || undefined} onNodeHover={setSelectedNodeId} />}
+        {graph && (
+          <GraphLayer graph={graph} colorBy={metric || undefined} onNodeHover={setSelectedNodeId} />
+        )}
         {selectedNode && popupPosition && (
-          <Popup 
+          <Popup
             position={popupPosition}
             offset={[0, -8]}
             autoPan={false}
             closeButton={false}
             closeOnClick={false}
           >
-          <NodeCard 
-            node={{ id: selectedNode.id }}
-            metrics={[
-              { 
-                id: 'degree', 
-                label: 'Степень вершины', 
-                value: typeof degree === 'number' ? degree : null
-              },
-          ]}
-          onClose={() => setSelectedNodeId(null)}
-          />
+            <NodeCard
+              node={{ id: selectedNode.id }}
+              metrics={[
+                {
+                  id: 'degree',
+                  label: 'Степень вершины',
+                  value: typeof degree === 'number' ? degree : null,
+                },
+              ]}
+              onClose={() => setSelectedNodeId(null)}
+            />
           </Popup>
         )}
       </MapView>
