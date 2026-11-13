@@ -56,10 +56,10 @@
 }
 
 .infoCard {
-  position: absolute; 
+  position: absolute;
   top: 35%;
   left: 50%;
-  
+
   z-index: 900;
   transform: translateX(-45%);
 }
