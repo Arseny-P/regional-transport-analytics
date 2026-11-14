@@ -23,6 +23,7 @@ type GraphNode struct {
 
 type GraphEdge struct {
 	ID         string         `json:"id"`
+	SegmentID  *Identifier    `json:"segment_id,omitempty"`
 	Source     string         `json:"source"`
 	Target     string         `json:"target"`
 	Geometry   [][]float64    `json:"geometry,omitempty"`
@@ -30,6 +31,7 @@ type GraphEdge struct {
 }
 
 type Metric struct {
-	Name  string  `json:"name"`
-	Value float32 `json:"value"`
+	NodeID *Identifier `json:"node_id,omitempty"`
+	Name   string      `json:"name"`
+	Value  float32     `json:"value"`
 }
