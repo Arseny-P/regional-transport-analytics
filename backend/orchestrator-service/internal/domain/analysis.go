@@ -59,6 +59,7 @@ type GraphNode struct {
 
 type GraphEdge struct {
 	ID         string
+	SegmentID  *string
 	Source     string
 	Target     string
 	Geometry   [][]float64
@@ -66,8 +67,9 @@ type GraphEdge struct {
 }
 
 type Metric struct {
-	Name  string
-	Value float32
+	NodeID *string
+	Name   string
+	Value  float32
 }
 
 type ErrorResp struct {

@@ -50,11 +50,16 @@ func (c *Consumer) FetchMessage(ctx context.Context) (domain.InboxMessage, kafka
 	if dtoInboxMessage.Payload.Metrics != nil {
 		inboxMessage.Payload.Metrics = make([]domain.Metric, 0, len(dtoInboxMessage.Payload.Metrics))
 	}
+	var domainMetric domain.Metric
 	for _, metric := range dtoInboxMessage.Payload.Metrics {
-		inboxMessage.Payload.Metrics = append(inboxMessage.Payload.Metrics, domain.Metric{
+		domainMetric = domain.Metric{
 			Name:  metric.Name,
 			Value: metric.Value,
-		})
+		}
+		if metric.NodeID != nil {
+			domainMetric.NodeID = metric.NodeID
+		}
+		inboxMessage.Payload.Metrics = append(inboxMessage.Payload.Metrics, domainMetric)
 	}
 
 	if dtoInboxMessage.Payload.Graph != nil {
@@ -72,6 +77,7 @@ func (c *Consumer) FetchMessage(ctx context.Context) (domain.InboxMessage, kafka
 		for _, edge := range graph.Edges {
 			edges = append(edges, domain.GraphEdge{
 				ID:         edge.ID,
+				SegmentID:  edge.SegmentID,
 				Source:     edge.Source,
 				Target:     edge.Target,
 				Geometry:   edge.Geometry,
