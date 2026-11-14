@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"orchestrator-service/internal/dto"
 	httpdto "orchestrator-service/internal/dto/http"
 	kafkadto "orchestrator-service/internal/dto/kafka"
+	"reflect"
 	"testing"
 	"time"
 
@@ -17,7 +19,103 @@ import (
 func TestIntegration(t *testing.T) {
 	env := newTestEnvironment(t)
 	t.Run("status", env.testStatus)
+	t.Run("result", env.testAnalysisResult)
 	t.Run("dlq", env.testDLQ)
+}
+
+func (env *testEnvironment) testAnalysisResult(t *testing.T) {
+	jobID := env.createJob(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	segmentID := "segment_1_2"
+	firstNodeID, secondNodeID := "1", "2"
+	graph := &dto.Graph{
+		Nodes: []dto.GraphNode{
+			{
+				ID: "warehouse_1", Position: []float64{29.999, 60},
+				Attributes: map[string]any{"object_type": "warehouse", "name": "Склад", "is_isolated": false},
+			},
+			{
+				ID: "1", Position: []float64{30, 60},
+				Attributes: map[string]any{"object_type": "road_node"},
+			},
+			{
+				ID: "2", Position: []float64{30.01, 60},
+				Attributes: map[string]any{"object_type": "intersection"},
+			},
+		},
+		Edges: []dto.GraphEdge{
+			{
+				ID: "road_forward", SegmentID: &segmentID, Source: "1", Target: "2",
+				Geometry:   [][]float64{{30, 60}, {30.005, 60.001}, {30.01, 60}},
+				Attributes: map[string]any{"edge_type": "road", "oneway": false, "length_m": 600.0},
+			},
+			{
+				ID: "connector", Source: "warehouse_1", Target: "1",
+				Geometry:   [][]float64{{29.999, 60}, {30, 60}},
+				Attributes: map[string]any{"edge_type": "access_connector"},
+			},
+			{
+				ID: "road_reverse", SegmentID: &segmentID, Source: "2", Target: "1",
+				Geometry:   [][]float64{{30.01, 60}, {30.005, 60.001}, {30, 60}},
+				Attributes: map[string]any{"edge_type": "road", "oneway": false, "length_m": 600.0},
+			},
+		},
+	}
+	metrics := []dto.Metric{
+		{NodeID: &firstNodeID, Name: "pagerank", Value: 0.4},
+		{Name: "vertex_count", Value: 3},
+		{NodeID: &secondNodeID, Name: "pagerank", Value: 0.6},
+	}
+
+	payload, err := json.Marshal(kafkadto.InboxMessage{
+		MessageID: uuid.New(),
+		JobID:     jobID,
+		Type:      "RESULT",
+		Payload:   kafkadto.AnalysisPayload{Status: "completed", Graph: graph, Metrics: metrics},
+	})
+	checkError(t, err, "encode result event")
+	checkError(t, env.writer.WriteMessages(ctx, kafka.Message{
+		Key: []byte(jobID.String()), Value: payload,
+	}), "send result event")
+
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	var result httpdto.AnalysisResult
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+			env.server.URL+"/analysis/result?job_id="+jobID.String(), http.NoBody)
+		checkError(t, err, "create result request")
+		response, err := env.server.Client().Do(req)
+		checkError(t, err, "get analysis result over HTTP")
+		if response.StatusCode != http.StatusOK {
+			_ = response.Body.Close()
+			t.Fatalf("HTTP status = %d, want 200", response.StatusCode)
+		}
+
+		result = httpdto.AnalysisResult{}
+		decodeErr := json.NewDecoder(response.Body).Decode(&result)
+		checkError(t, response.Body.Close(), "close HTTP response")
+		checkError(t, decodeErr, "decode HTTP result")
+		if result.Status == httpdto.Completed {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("HTTP job status = %q, want completed: %v", result.Status, ctx.Err())
+		case <-ticker.C:
+		}
+	}
+
+	expected := httpdto.AnalysisResult{
+		JobID: jobID.String(), Status: httpdto.Completed,
+		GraphAvailable: true, MetricsAvailable: true,
+		Graph: graph, Metrics: metrics,
+	}
+	if !reflect.DeepEqual(expected, result) {
+		t.Errorf("HTTP result = %#v, want %#v", result, expected)
+	}
 }
 
 func (env *testEnvironment) testStatus(t *testing.T) {

@@ -839,10 +839,17 @@ components:
     Graph:
       type: object
       description: |
-        Граф задачи: вершины с идентификаторами и координатами,
-        рёбра с идентификаторами и ссылками source и target на вершины.
-        У вершин и рёбер могут быть дополнительные атрибуты attributes.
-        Геометрия ребра, если передана, задаётся списком точек geometry.
+        Дорожный граф задачи: склады, перекрёстки и промежуточные дорожные узлы.
+        Тип вершины передаётся в attributes.object_type, тип ребра — в attributes.edge_type.
+        Дорожные сегменты road отделены от связей склада с дорожной сетью access_connector.
+        Изолированные склады сохраняются в nodes с attributes.is_isolated: true.
+        Каждое ребро направлено от source к target; оба идентификатора ссылаются на nodes.
+        Обратное направление, если оно входит в результат, представлено отдельным ребром
+        с собственным id. Два направления одного физического дорожного участка
+        имеют одинаковый segment_id.
+        Координаты вершин position и точек геометрии ребра geometry передаются
+        в порядке [longitude, latitude]. Дополнительные сведения сохраняются в attributes.
+        В старых результатах типы вершин и рёбер, а также segment_id могут отсутствовать.
       required: [nodes, edges]
       properties:
         nodes:
@@ -858,6 +865,21 @@ components:
               attributes:
                 type: object
                 additionalProperties: true
+                description: Тип вершины и дополнительные сведения о ней; остальные атрибуты не ограничены этим перечнем.
+                properties:
+                  object_type:
+                    type: string
+                    enum: [warehouse, intersection, road_node]
+                    description: Склад, перекрёсток или промежуточный узел дорожной сети соответственно.
+                  name:
+                    type: string
+                    description: Отображаемое название вершины.
+                  is_isolated:
+                    type: boolean
+                    description: Для склада — отсутствие найденной связи с другими складами.
+                  isolation_reason:
+                    type: string
+                    description: Причина изоляции склада, если она известна.
         edges:
           type: array
           items:
@@ -866,6 +888,12 @@ components:
             properties:
               id:
                 $ref: '#/components/schemas/Identifier'
+              segment_id:
+                $ref: '#/components/schemas/Identifier'
+                description: |
+                  Идентификатор физического дорожного участка.
+                  Рёбра разных направлений одного участка используют одинаковый segment_id.
+                  У access_connector поле отсутствует; старые результаты могут не содержать его.
               source:
                 type: string
                 description: Идентификатор начальной вершины из nodes.
@@ -881,11 +909,37 @@ components:
               attributes:
                 type: object
                 additionalProperties: true
+                description: Тип ребра и дополнительные сведения о нём; остальные атрибуты не ограничены этим перечнем.
+                properties:
+                  edge_type:
+                    type: string
+                    enum: [road, access_connector]
+                    description: |
+                      road — дорожный сегмент найденного маршрута.
+                      access_connector — связь склада с точкой подключения к дорожной сети;
+                      это отдельный тип связи, у которого отсутствует segment_id.
+                  length_m:
+                    type: number
+                    minimum: 0
+                    description: Длина дорожного сегмента или коннектора в метрах.
+                  oneway:
+                    type: boolean
+                    description: |
+                      Признак одностороннего движения исходной дороги.
+                      Наличие обратного ребра в результате определяется составом edges.
+                  routes_count:
+                    type: integer
+                    minimum: 0
+                    description: Число найденных направленных маршрутов, использующих это ребро.
 
     Metrics:
       type: array
       description: |
         Массив числовых метрик. Каждый элемент содержит имя name и значение value (float).
+        Общие метрики графа передаются без node_id; метрики отдельных вершин
+        содержат node_id, совпадающий с id вершины из graph.nodes.
+        Одинаковое имя показателя может встречаться у разных вершин:
+        такие значения различаются по node_id и не объединяются.
         При обработке задачи считаются все поддерживаемые метрики,
         при выдаче все рассчитанные значения возвращаются одним ответом.
         Метрики без рассчитанного значения отсутствуют в массиве.
@@ -895,6 +949,9 @@ components:
         type: object
         required: [name, value]
         properties:
+          node_id:
+            $ref: '#/components/schemas/Identifier'
+            description: Необязательный идентификатор вершины из graph.nodes; у общей метрики поле отсутствует.
           name:
             type: string
             minLength: 1
@@ -905,6 +962,8 @@ components:
       example:
         - {name: vertex_count, value: 2.0}
         - {name: edge_count, value: 1.0}
+        - {node_id: '1', name: pagerank, value: 0.5}
+        - {node_id: '2', name: pagerank, value: 0.5}
 
     Error:
       type: object
