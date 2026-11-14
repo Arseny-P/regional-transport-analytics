@@ -245,12 +245,18 @@ func (hc *HTTPController) GetAnalysisResultHandler() http.HandlerFunc {
 			for _, edge := range graph.Edges {
 				resp.Graph.Edges = append(resp.Graph.Edges, dto.GraphEdge{
 					ID: edge.ID, Source: edge.Source, Target: edge.Target,
-					Geometry: edge.Geometry, Attributes: edge.Attributes,
+					SegmentID: edge.SegmentID,
+					Geometry:  edge.Geometry, Attributes: edge.Attributes,
 				})
 			}
 		}
+		var dtoMetric dto.Metric
 		for _, metric := range result.Payload.Metrics {
-			resp.Metrics = append(resp.Metrics, dto.Metric{Name: metric.Name, Value: metric.Value})
+			dtoMetric = dto.Metric{Name: metric.Name, Value: metric.Value}
+			if metric.NodeID != nil {
+				dtoMetric.NodeID = metric.NodeID
+			}
+			resp.Metrics = append(resp.Metrics, dtoMetric)
 		}
 		hc.WriteResponse(w, http.StatusOK, resp)
 	}

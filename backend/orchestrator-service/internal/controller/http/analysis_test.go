@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"orchestrator-service/internal/domain"
+	"orchestrator-service/internal/dto"
 	httpdto "orchestrator-service/internal/dto/http"
 	"testing"
 	"time"
@@ -407,6 +408,274 @@ func TestCancelAnalysisHandler(t *testing.T) {
 			var body httpdto.AnalysisStatus
 			require.NoError(t, json.Unmarshal(response.Body.Bytes(), &body))
 			assert.Equal(t, tt.ExpectedResp, body)
+		})
+	}
+}
+
+func TestGetAnalysisResultHandler(t *testing.T) {
+	id := uuid.New()
+	segmentID := "segment_1_2"
+	firstNodeID, secondNodeID := "1", "2"
+	graph := &domain.Graph{
+		Nodes: []domain.GraphNode{
+			{
+				ID: "warehouse_1", Position: []float64{29.999, 60},
+				Attributes: map[string]any{"object_type": "warehouse", "name": "Склад", "is_isolated": false},
+			},
+			{
+				ID: "1", Position: []float64{30, 60},
+				Attributes: map[string]any{"object_type": "road_node"},
+			},
+			{
+				ID: "2", Position: []float64{30.01, 60},
+				Attributes: map[string]any{"object_type": "intersection"},
+			},
+		},
+		Edges: []domain.GraphEdge{
+			{
+				ID: "road_forward", SegmentID: &segmentID, Source: "1", Target: "2",
+				Geometry:   [][]float64{{30, 60}, {30.005, 60.001}, {30.01, 60}},
+				Attributes: map[string]any{"edge_type": "road", "oneway": false, "length_m": 600.0},
+			},
+			{
+				ID: "connector", Source: "warehouse_1", Target: "1",
+				Geometry:   [][]float64{{29.999, 60}, {30, 60}},
+				Attributes: map[string]any{"edge_type": "access_connector"},
+			},
+			{
+				ID: "road_reverse", SegmentID: &segmentID, Source: "2", Target: "1",
+				Geometry:   [][]float64{{30.01, 60}, {30.005, 60.001}, {30, 60}},
+				Attributes: map[string]any{"edge_type": "road", "oneway": false, "length_m": 600.0},
+			},
+		},
+	}
+	expectedGraph := &httpdto.Graph{
+		Nodes: []dto.GraphNode{
+			{
+				ID: "warehouse_1", Position: []float64{29.999, 60},
+				Attributes: map[string]any{"object_type": "warehouse", "name": "Склад", "is_isolated": false},
+			},
+			{
+				ID: "1", Position: []float64{30, 60},
+				Attributes: map[string]any{"object_type": "road_node"},
+			},
+			{
+				ID: "2", Position: []float64{30.01, 60},
+				Attributes: map[string]any{"object_type": "intersection"},
+			},
+		},
+		Edges: []dto.GraphEdge{
+			{
+				ID: "road_forward", SegmentID: &segmentID, Source: "1", Target: "2",
+				Geometry:   [][]float64{{30, 60}, {30.005, 60.001}, {30.01, 60}},
+				Attributes: map[string]any{"edge_type": "road", "oneway": false, "length_m": 600.0},
+			},
+			{
+				ID: "connector", Source: "warehouse_1", Target: "1",
+				Geometry:   [][]float64{{29.999, 60}, {30, 60}},
+				Attributes: map[string]any{"edge_type": "access_connector"},
+			},
+			{
+				ID: "road_reverse", SegmentID: &segmentID, Source: "2", Target: "1",
+				Geometry:   [][]float64{{30.01, 60}, {30.005, 60.001}, {30, 60}},
+				Attributes: map[string]any{"edge_type": "road", "oneway": false, "length_m": 600.0},
+			},
+		},
+	}
+	legacyGraph := &domain.Graph{
+		Nodes: []domain.GraphNode{
+			{ID: "1", Position: []float64{30, 60}},
+			{ID: "2", Position: []float64{30.01, 60}},
+		},
+		Edges: []domain.GraphEdge{{ID: "old_edge", Source: "1", Target: "2"}},
+	}
+	expectedLegacyGraph := &httpdto.Graph{
+		Nodes: []dto.GraphNode{
+			{ID: "1", Position: []float64{30, 60}},
+			{ID: "2", Position: []float64{30.01, 60}},
+		},
+		Edges: []dto.GraphEdge{{ID: "old_edge", Source: "1", Target: "2"}},
+	}
+
+	testTable := []struct {
+		TestName              string
+		JobID                 string
+		Result                domain.AnalysisResult
+		ExpectedResponse      httpdto.AnalysisResult
+		JobUsecaseErr         error
+		ExpectedCode          int
+		ExpectedErrorResponse *httpdto.Error
+	}{
+		{
+			TestName: "Готовый результат сохраняет segment_id, node_id и attributes",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID: id, GraphAvailable: true, MetricsAvailable: true,
+				Payload: domain.AnalysisPayload{
+					Status: "completed", Graph: graph,
+					Metrics: []domain.Metric{
+						{NodeID: &firstNodeID, Name: "pagerank", Value: 0.4},
+						{Name: "vertex_count", Value: 3},
+						{NodeID: &secondNodeID, Name: "pagerank", Value: 0.6},
+					},
+				},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Completed,
+				GraphAvailable: true, MetricsAvailable: true, Graph: expectedGraph,
+				Metrics: httpdto.Metrics{
+					{NodeID: &firstNodeID, Name: "pagerank", Value: 0.4},
+					{Name: "vertex_count", Value: 3},
+					{NodeID: &secondNodeID, Name: "pagerank", Value: 0.6},
+				},
+			},
+		},
+		{
+			TestName: "Результаты ещё не получены",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID: id, Payload: domain.AnalysisPayload{Status: "running"},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Running, Metrics: httpdto.Metrics{},
+			},
+		},
+		{
+			TestName: "Граф готов, метрики ещё не получены",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID: id, GraphAvailable: true,
+				Payload: domain.AnalysisPayload{Status: "running", Graph: graph},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Running, GraphAvailable: true,
+				Graph: expectedGraph, Metrics: httpdto.Metrics{},
+			},
+		},
+		{
+			TestName: "Ошибка анализа с сохранённым графом",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID: id, GraphAvailable: true,
+				Payload: domain.AnalysisPayload{
+					Status: "failed", Graph: graph,
+					Error: &domain.ErrorResp{Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики"},
+				},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Failed, GraphAvailable: true,
+				Graph: expectedGraph, Metrics: httpdto.Metrics{},
+				Error: &httpdto.AnalysisFailure{Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики"},
+			},
+		},
+		{
+			TestName: "Построенный пустой граф и пустые метрики доступны",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID: id, GraphAvailable: true, MetricsAvailable: true,
+				Payload: domain.AnalysisPayload{
+					Status: "completed", Graph: &domain.Graph{}, Metrics: []domain.Metric{},
+				},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Completed, GraphAvailable: true, MetricsAvailable: true,
+				Graph: &httpdto.Graph{Nodes: []dto.GraphNode{}, Edges: []dto.GraphEdge{}}, Metrics: httpdto.Metrics{},
+			},
+		},
+		{
+			TestName: "Старый результат без segment_id и node_id",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID: id, GraphAvailable: true, MetricsAvailable: true,
+				Payload: domain.AnalysisPayload{
+					Status: "completed", Graph: legacyGraph,
+					Metrics: []domain.Metric{{Name: "vertex_count", Value: 2}},
+				},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Completed, GraphAvailable: true, MetricsAvailable: true,
+				Graph: expectedLegacyGraph, Metrics: httpdto.Metrics{{Name: "vertex_count", Value: 2}},
+			},
+		},
+		{
+			TestName:     "Не передан job_id",
+			ExpectedCode: http.StatusBadRequest,
+			ExpectedErrorResponse: &httpdto.Error{
+				Code: "missing_job_id", Field: "job_id", Message: "Укажи job_id в параметрах запроса",
+			},
+		},
+		{
+			TestName:     "Некорректный UUID",
+			JobID:        "not-a-uuid",
+			ExpectedCode: http.StatusBadRequest,
+			ExpectedErrorResponse: &httpdto.Error{
+				Code: "invalid_job_id", Field: "job_id", Message: "job_id должен быть UUID",
+			},
+		},
+		{
+			TestName:      "Задача не найдена",
+			JobID:         id.String(),
+			JobUsecaseErr: domain.ErrJobNotFound,
+			ExpectedCode:  http.StatusNotFound,
+			ExpectedErrorResponse: &httpdto.Error{
+				Code: "job_not_found", Field: "job_id", Message: "Задача не найдена",
+			},
+		},
+		{
+			TestName:      "Ошибка БД",
+			JobID:         id.String(),
+			JobUsecaseErr: domain.ErrInternalDB,
+			ExpectedCode:  http.StatusInternalServerError,
+			ExpectedErrorResponse: &httpdto.Error{
+				Code: "internal_db_error", Message: "Не удалось выполнить операцию с базой данных",
+			},
+		},
+		{
+			TestName:      "Внутренняя ошибка",
+			JobID:         id.String(),
+			JobUsecaseErr: domain.ErrInternalServer,
+			ExpectedCode:  http.StatusInternalServerError,
+			ExpectedErrorResponse: &httpdto.Error{
+				Code: "internal_error", Message: "Внутренняя ошибка сервера",
+			},
+		},
+	}
+
+	for _, tt := range testTable {
+		t.Run(tt.TestName, func(t *testing.T) {
+			mockJobUsecase := MockJobUsecase{
+				result: tt.Result,
+				err:    tt.JobUsecaseErr,
+			}
+
+			controller := NewHTTPController(&mockJobUsecase, nil, nil, slog.Default())
+			url := "/analysis/result"
+			if tt.JobID != "" {
+				url += "?job_id=" + tt.JobID
+			}
+			req := httptest.NewRequest(http.MethodGet, url, http.NoBody)
+			w := httptest.NewRecorder()
+
+			controller.GetAnalysisResultHandler().ServeHTTP(w, req)
+
+			require.Equal(t, tt.ExpectedCode, w.Code)
+			assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+			if tt.ExpectedErrorResponse != nil {
+				var body httpdto.Error
+				require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+				assert.Equal(t, *tt.ExpectedErrorResponse, body)
+				return
+			}
+
+			expectedJSON, err := json.Marshal(tt.ExpectedResponse)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(expectedJSON), w.Body.String())
 		})
 	}
 }
