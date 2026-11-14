@@ -1,0 +1,16 @@
+node_modules
+dist
+dist-ssr
+.vite
+*.local
+.env
+.env.*
+!.env.example
+*.log
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Dockerfile
+.dockerignore
