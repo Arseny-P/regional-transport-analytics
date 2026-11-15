@@ -8,8 +8,6 @@ interface MetricSelectProps {
 }
 
 export function MetricSelect({ metrics, value, onChange }: MetricSelectProps) {
-  const selected = metrics.find((metric) => metric.name === value);
-
   return (
     <div className={styles.root}>
       <select value={value} onChange={(e) => onChange(e.target.value)} className={styles.select}>
@@ -20,11 +18,6 @@ export function MetricSelect({ metrics, value, onChange }: MetricSelectProps) {
           </option>
         ))}
       </select>
-      {selected && (
-        <div>
-          Значение: <b>{selected.value}</b>
-        </div>
-      )}
     </div>
   );
 }
