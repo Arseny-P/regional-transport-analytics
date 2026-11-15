@@ -120,6 +120,19 @@ function metricsOf(graph: Graph): Metric[] {
 }
 
 function statusOf(jobId: string, job: MockJob): AnalysisStatus {
+  if (job.scenario === 'graph-failed') {
+    return {
+      job_id: jobId,
+      status: 'failed',
+      graph_available: false,
+      metrics_available: false,
+      error: {
+        code: 'graph_build_failed',
+        message: 'Не удалось построить дорожный граф.',
+      },
+    };
+  }
+
   const elapsed = Date.now() - job.createdAt;
   const graphReady = elapsed >= GRAPH_MS;
   const base = { job_id: jobId, graph_available: graphReady, metrics_available: false };
