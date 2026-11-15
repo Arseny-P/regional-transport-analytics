@@ -17,6 +17,7 @@ interface RequestOptions {
   method?: 'GET' | 'POST';
   params?: QueryParams;
   body?: unknown;
+  signal?: AbortSignal;
 }
 
 export function buildUrl(path: string, params: QueryParams = {}): string {
@@ -39,10 +40,11 @@ async function toApiError(response: Response): Promise<ApiError> {
 
 export async function request<T>(
   path: string,
-  { method = 'GET', params, body }: RequestOptions = {}
+  { method = 'GET', params, body, signal }: RequestOptions = {}
 ): Promise<T> {
   const response = await fetch(buildUrl(path, params), {
     method,
+    signal,
     ...(body !== undefined && {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
