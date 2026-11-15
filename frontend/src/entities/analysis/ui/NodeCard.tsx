@@ -1,6 +1,6 @@
 import styles from './NodeCard.module.css';
 
-type NodeKind = 'warehouse' | 'intersection';
+type NodeKind = 'warehouse' | 'intersection' | 'road_node';
 
 interface NodeMetric {
   id: string;
@@ -20,7 +20,9 @@ interface NodeCardProps {
   onClose: () => void;
 }
 
+// надо подумать над подписями
 const KIND_LABELS: Record<NodeKind, string> = {
+  road_node: 'Просто дорога',
   warehouse: 'Склад',
   intersection: 'Перекрёсток',
 };

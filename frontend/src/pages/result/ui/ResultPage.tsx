@@ -3,9 +3,10 @@ import { Popup } from 'react-leaflet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
-// import { MetricSelect } from '@/features/select-metric';
+import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
+  selectMetrics,
   isFinalState,
   METRIC_LABELS,
   useAnalysisJob,
@@ -51,19 +52,19 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const { status, result, requestError } = useAnalysisJob(jobId);
-  const [metric] = useState('');
+  const [metric, setMetric] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const job = status ?? result;
   const graph = result?.graph;
   const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
-  const degree = selectedNode?.attributes?.degree;
+  const { globalMetrics, metricsByNodeId } = selectMetrics(result?.metrics ?? []);
   const popupPosition: [number, number] | null = selectedNode
     ? [selectedNode.position[1], selectedNode.position[0]]
     : null;
   const notFound = requestError instanceof ApiError && requestError.status === 404;
   const isFinal = !!job && isFinalState(job.status);
-  const isWaiting = !notFound && !graph && !isFinal;
+  const isWaiting = !notFound && !graph && (!isFinal || !result);
   const hasGraph = !!graph?.nodes.length;
   const changeArea = (
     <Button onClick={() => navigate('/analysis')}>Изменить область или параметры</Button>
@@ -89,8 +90,17 @@ function JobResult({ jobId }: { jobId: string }) {
       {requestError && <p className={styles.warning}>Нет связи с сервером, повторяем запрос...</p>}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
 
+      <MetricSelect
+        metrics={[
+          ...new Map(
+            (result?.metrics ?? []).filter((m) => m.node_id !== undefined).map((m) => [m.name, m])
+          ).values(),
+        ]}
+        value={metric}
+        onChange={setMetric}
+      />
       <h4>Простые метрики графа:</h4>
-      {result?.metrics.length ? (
+      {globalMetrics.length ? (
         <>
           <table className={styles.metricsTable}>
             <thead>
@@ -101,7 +111,7 @@ function JobResult({ jobId }: { jobId: string }) {
             </thead>
             <tbody>
               {' '}
-              {result.metrics.map(({ name, value }) => (
+              {globalMetrics.map(({ name, value }) => (
                 <tr key={name}>
                   <th scope="row">{METRIC_LABELS[name] ?? name}</th>
                   <td>{value ?? 'Не рассчитано'}</td>
@@ -126,7 +136,12 @@ function JobResult({ jobId }: { jobId: string }) {
     <ResultLayout sidebar={sidebar}>
       <MapView>
         {graph && (
-          <GraphLayer graph={graph} colorBy={metric || undefined} onNodeHover={setSelectedNodeId} />
+          <GraphLayer
+            metrics={result?.metrics ?? []}
+            graph={graph}
+            colorBy={metric || undefined}
+            onNodeHover={setSelectedNodeId}
+          />
         )}
         {selectedNode && popupPosition && (
           <Popup
@@ -137,14 +152,19 @@ function JobResult({ jobId }: { jobId: string }) {
             closeOnClick={false}
           >
             <NodeCard
-              node={{ id: selectedNode.id }}
-              metrics={[
-                {
-                  id: 'degree',
-                  label: 'Степень вершины',
-                  value: typeof degree === 'number' ? degree : null,
-                },
-              ]}
+              node={{
+                id: selectedNode.id,
+                kind: selectedNode.attributes?.object_type,
+                name: selectedNode.attributes?.name,
+                connectionStatus: selectedNode.attributes?.is_isolated
+                  ? (selectedNode.attributes.isolation_reason ?? 'Изолирован')
+                  : undefined,
+              }}
+              metrics={(metricsByNodeId.get(selectedNode.id) ?? []).map(({ name, value }) => ({
+                id: name,
+                label: METRIC_LABELS[name] ?? name,
+                value,
+              }))}
               onClose={() => setSelectedNodeId(null)}
             />
           </Popup>
@@ -172,7 +192,7 @@ function JobResult({ jobId }: { jobId: string }) {
           />
         </div>
       )}
-      {!notFound && isFinal && !hasGraph && (
+      {!notFound && isFinal && !!result && !hasGraph && (
         <div className={styles.overlay}>
           <Message
             title={

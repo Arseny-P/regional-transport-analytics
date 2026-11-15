@@ -3,7 +3,7 @@ import type { LatLngTuple } from 'leaflet';
 import { CircleMarker, Polyline, Tooltip, useMap } from 'react-leaflet';
 import type { Position } from '@/shared/api';
 import { nodeColor } from '../lib/nodeColor';
-import type { Graph } from '../model/types';
+import type { Graph, Metric } from '../model/types';
 
 const DEFAULT_NODE_COLOR = '#0f62fe';
 
@@ -11,11 +11,12 @@ const toLatLng = ([lng, lat]: Position): LatLngTuple => [lat, lng];
 
 interface GraphLayerProps {
   graph: Graph;
+  metrics: Metric[];
   colorBy?: string;
   onNodeHover?: (nodeId: string) => void;
 }
 
-export function GraphLayer({ graph, colorBy, onNodeHover }: GraphLayerProps) {
+export function GraphLayer({ graph, metrics, colorBy, onNodeHover }: GraphLayerProps) {
   const map = useMap();
 
   const nodePositions = useMemo(
@@ -27,7 +28,9 @@ export function GraphLayer({ graph, colorBy, onNodeHover }: GraphLayerProps) {
     if (nodePositions.size) map.fitBounds([...nodePositions.values()], { padding: [40, 40] });
   }, [map, nodePositions]);
 
-  const values = graph.nodes.map((node) => node.attributes?.[colorBy ?? '']);
+  const values = graph.nodes.map(
+    (node) => metrics.find((m) => m.node_id === node.id && m.name === colorBy)?.value
+  );
   const numbers = values.filter((value): value is number => typeof value === 'number');
   const min = Math.min(...numbers);
   const max = Math.max(...numbers);
@@ -43,7 +46,11 @@ export function GraphLayer({ graph, colorBy, onNodeHover }: GraphLayerProps) {
             <Polyline
               key={edge.id}
               positions={positions}
-              pathOptions={{ color: '#555', weight: 2 }}
+              pathOptions={{
+                color: edge.attributes?.edge_type === 'access_connector' ? '#888' : '#555',
+                weight: 2,
+                dashArray: edge.attributes?.edge_type === 'access_connector' ? '4 4' : undefined,
+              }}
             />
           )
         );
@@ -56,9 +63,15 @@ export function GraphLayer({ graph, colorBy, onNodeHover }: GraphLayerProps) {
           <CircleMarker
             key={node.id}
             center={toLatLng(node.position)}
-            radius={6}
+            radius={
+              node.attributes?.object_type === 'warehouse'
+                ? 9
+                : node.attributes?.object_type === 'road_node'
+                  ? 4
+                  : 6
+            }
             pathOptions={{ color, fillColor: color, fillOpacity: 0.9 }}
-            eventHandlers={{ mouseover: () => onNodeHover?.(node.id), }}
+            eventHandlers={{ mouseover: () => onNodeHover?.(node.id) }}
           >
             {typeof value === 'number' && <Tooltip>{`${colorBy}: ${value}`}</Tooltip>}
           </CircleMarker>
