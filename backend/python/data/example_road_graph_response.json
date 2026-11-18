@@ -80,6 +80,7 @@
         },
         {
           "id": "road_9000000001_100200_0",
+          "segment_id": "seg_9000000001_100200",
           "source": "9000000001",
           "target": "100200",
           "geometry": [
@@ -100,6 +101,7 @@
         },
         {
           "id": "road_100200_9000000002_0",
+          "segment_id": "seg_100200_9000000002",
           "source": "100200",
           "target": "9000000002",
           "geometry": [
@@ -139,22 +141,23 @@
       ]
     },
     "metrics": [
-      { "name": "vertex_count", "value": 5.0 },
-      { "name": "edge_count", "value": 4.0 },
-      { "name": "connected_components_count", "value": 1.0 },
-      { "name": "isolated_nodes_count", "value": 0.0 },
-      { "name": "isolated_nodes_ratio", "value": 0.0 },
-      { "name": "beta_index", "value": 0.8 },
-      { "name": "alpha_index", "value": 0.0 },
-      { "name": "gamma_index", "value": 0.4444 },
-      { "name": "avg_degree", "value": 1.6 },
-      { "name": "network_density", "value": 0.4 },
-      { "name": "avg_edge_distance_km", "value": 0.2536 },
-      { "name": "max_edge_distance_km", "value": 0.5208 },
-      { "name": "diameter_km", "value": 1.0144 },
-      { "name": "total_routes_count", "value": 1.0 },
+      { "name": "warehouse_count", "value": 2.0 },
+      { "name": "intersection_count", "value": 1.0 },
+      { "name": "road_segment_count", "value": 2.0 },
+      { "name": "component_count", "value": 1.0 },
+      { "name": "node_count", "value": 5.0 },
+      { "name": "road_node_count", "value": 2.0 },
+      { "name": "directed_road_edge_count", "value": 2.0 },
+      { "name": "access_connector_count", "value": 2.0 },
+      { "name": "total_routes_count", "value": 2.0 },
       { "name": "found_routes_count", "value": 1.0 },
-      { "name": "found_routes_ratio", "value": 1.0 }
+      { "name": "warehouses_without_routes_count", "value": 0.0 },
+      { "name": "nearest_warehouse_distance_m", "value": 993.0, "node_id": "hub_1" },
+      { "name": "nearby_warehouse_count", "value": 1.0, "node_id": "hub_1" },
+      { "name": "nearby_warehouse_count", "value": 0.0, "node_id": "hub_2" },
+      { "name": "pagerank", "value": 0.341172, "node_id": "100200" },
+      { "name": "betweenness_centrality", "value": 0.5, "node_id": "100200" },
+      { "name": "route_fraction", "value": 1.0, "node_id": "100200" }
     ]
   }
 }

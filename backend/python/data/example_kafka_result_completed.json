@@ -110,6 +110,26 @@
       {
         "name": "diameter_km",
         "value": 7.5
+      },
+      {
+        "name": "nearest_warehouse_distance_m",
+        "value": 7500.0,
+        "node_id": "hub_1"
+      },
+      {
+        "name": "nearby_warehouse_count",
+        "value": 0.0,
+        "node_id": "hub_1"
+      },
+      {
+        "name": "nearest_warehouse_distance_m",
+        "value": 7500.0,
+        "node_id": "hub_2"
+      },
+      {
+        "name": "nearby_warehouse_count",
+        "value": 0.0,
+        "node_id": "hub_2"
       }
     ]
   }

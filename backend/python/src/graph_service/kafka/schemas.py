@@ -216,7 +216,7 @@ class MetricItem:
         val = float(self.value)
         if not math.isfinite(val):
             raise ValueError(f"Метрика '{self.name}' содержит недопустимое нечисловое значение: {self.value}")
-        res: Dict[str, Any] = {"name": self.name, "value": round(val, 4)}
+        res: Dict[str, Any] = {"name": self.name, "value": round(val, 6)}
         if self.node_id is not None:
             res["node_id"] = str(self.node_id)
         return res

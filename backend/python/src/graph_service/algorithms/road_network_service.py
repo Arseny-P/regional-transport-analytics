@@ -8,7 +8,7 @@ from graph_service.http.osm_client import execute_with_overpass_fallback
 
 ox.settings.log_console = False
 ox.settings.use_cache = True
-ox.settings.requests_timeout = 60
+ox.settings.requests_timeout = 300
 
 
 class RoadNetworkService:
