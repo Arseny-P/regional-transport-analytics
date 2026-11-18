@@ -281,9 +281,10 @@ class AnalysisWorker:
 
             graph_payload = GraphSerializer.serialize(log_graph)
 
-            # Расчёт метрик Data Science (#28)
+            # Расчёт метрик Data Science (#28, #71)
             try:
-                metrics = GraphMetricsService.calculate_metrics(log_graph)
+                routes_data = getattr(response, "routes", None)
+                metrics = GraphMetricsService.calculate_metrics(log_graph, routes=routes_data)
                 result_payload = ResultEventPayload(
                     status=TaskStatus.COMPLETED.value,
                     graph=graph_payload,
