@@ -86,13 +86,24 @@ class RoadNetworkService:
     def load_graphml(self, filename: str) -> nx.MultiDiGraph:
         """
         Загружает дорожный граф из файла GraphML без обращения к интернету.
+        Поддерживает абсолютные пути, файлы в storage_dir и фикстуры.
         """
-        filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
-        if not os.path.exists(filepath):
-            raise FileNotFoundError(f"Файл дорожного графа не найден: {filepath}")
+        if os.path.isabs(filename) and os.path.exists(filename):
+            filepath = filename
+        elif os.path.exists(os.path.join(self.storage_dir, filename)):
+            filepath = os.path.join(self.storage_dir, filename)
+        elif os.path.exists(os.path.join(self.storage_dir, f"{filename}.graphml")):
+            filepath = os.path.join(self.storage_dir, f"{filename}.graphml")
+        else:
+            from graph_service.fixtures import find_fixture_files
+            road_fixture, _ = find_fixture_files(filename)
+            if road_fixture and os.path.exists(road_fixture):
+                filepath = road_fixture
+            else:
+                raise FileNotFoundError(f"Файл дорожного графа не найден: {filename}")
 
         graph = ox.load_graphml(filepath=filepath)
-        print(f"[+] Дорожный граф загружен из файла: {len(graph.nodes)} узлов, {len(graph.edges)} ребер.")
+        print(f"[+] Дорожный граф загружен из файла: {filepath} ({len(graph.nodes)} узлов, {len(graph.edges)} ребер).")
         return graph
 
     def export_to_geojson(self, graph: nx.MultiDiGraph, filename: str) -> str:
