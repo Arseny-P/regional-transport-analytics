@@ -25,7 +25,9 @@ export function mapOpenApiGraphToGeoJSON(graph: OpenApiGraph): RoadGraphData {
     const toNode = nodesMap.get(edge.to);
 
     if (!fromNode || !toNode) {
-      console.warn(`[mapOpenApiGraph] Edge ссылается на несуществующие ноды: from=${edge.from}, to=${edge.to}`);
+      console.warn(
+        `[mapOpenApiGraph] Edge ссылается на несуществующие ноды: from=${edge.from}, to=${edge.to}`
+      );
       continue;
     }
 
@@ -33,7 +35,10 @@ export function mapOpenApiGraphToGeoJSON(graph: OpenApiGraph): RoadGraphData {
     const coordinates: [number, number][] =
       edge.geometry && edge.geometry.length >= 2
         ? edge.geometry
-        : [[fromNode.lon, fromNode.lat], [toNode.lon, toNode.lat]];
+        : [
+            [fromNode.lon, fromNode.lat],
+            [toNode.lon, toNode.lat],
+          ];
 
     edgeFeatures.push({
       type: 'Feature',

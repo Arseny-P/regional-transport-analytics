@@ -1,6 +1,6 @@
 import { GeoJSON } from 'react-leaflet';
 import * as L from 'leaflet';
-import type { Feature, FeatureCollection, Point, LineString } from 'geojson';
+import type { FeatureCollection, Point, LineString } from 'geojson';
 
 interface RoadGraphLayerProps {
   data: FeatureCollection<Point | LineString> | null;
@@ -9,7 +9,12 @@ interface RoadGraphLayerProps {
   regionLabel: string;
 }
 
-export function RoadGraphLayer({ data, regionColor, pointColor, regionLabel }: RoadGraphLayerProps) {
+export function RoadGraphLayer({
+  data,
+  regionColor,
+  pointColor,
+  regionLabel,
+}: RoadGraphLayerProps) {
   if (!data) return null;
 
   return (
@@ -26,8 +31,8 @@ export function RoadGraphLayer({ data, regionColor, pointColor, regionLabel }: R
           const name = feature.properties?.name ?? 'Объект';
           return L.circleMarker(latlng, {
             radius: 8,
-            fillColor: pointColor, 
-            color: '#ffffff',
+            fillColor: pointColor,
+            color: '#b1df0ce2',
             weight: 2,
             fillOpacity: 0.9,
           }).bindPopup(`<b>${name}</b><br/><small>(${regionLabel})</small>`);

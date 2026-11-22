@@ -11,11 +11,12 @@ import {
   fetchRoadGraph,
   fetchOriginalPoints,
   RoadGraphLayer,
-  RoadGraphLegend
+  RoadGraphLegend,
 } from '@/entities/road-graph';
 import type { LogisticsPoint } from '@/entities/road-graph';
 
 interface MapViewProps {
+  onNodeClick?: (nodeId: string) => void;
   center?: LatLngTuple;
   zoom?: number;
   children?: ReactNode;
@@ -27,6 +28,7 @@ interface MapViewProps {
 }
 
 interface RegionData {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   graph: any;
   points: LogisticsPoint[];
 }
@@ -49,7 +51,7 @@ export function MapView({
         fetchRoadGraph(region.url),
         fetchOriginalPoints(region.pointsUrl),
       ]);
-      
+
       setRegionsData((prev) => ({
         ...prev,
         [region.id]: { graph, points },
@@ -58,41 +60,36 @@ export function MapView({
   }, []);
 
   return (
-    <MapContainer 
-      center={center} 
-      zoom={zoom} 
-      className={styles.map} 
-      zoomControl={false}
-    >
+    <MapContainer center={center} zoom={zoom} className={styles.map} zoomControl={false}>
       <TileLayer url={OSM_TILE_URL} attribution="" />
-      
+
       {REGIONS_CONFIG.map((region) => {
         const data = regionsData[region.id];
         if (!data?.graph) return null;
-        
+
         return (
-          <RoadGraphLayer 
+          <RoadGraphLayer
             key={region.id}
-            data={data.graph} 
-            regionColor={region.color} 
+            data={data.graph}
+            regionColor={region.color}
             pointColor={region.pointColor}
-            regionLabel={region.label} 
+            regionLabel={region.label}
           />
         );
       })}
-      
+
       <RoadGraphLegend />
-      
+
       {onAreaSelect && (
-        <SelectArea 
+        <SelectArea
           onChange={onAreaSelect}
-          point1={point1} 
-          point2={point2} 
-          setPoint1={setPoint1} 
-          setPoint2={setPoint2} 
+          point1={point1}
+          point2={point2}
+          setPoint1={setPoint1}
+          setPoint2={setPoint2}
         />
       )}
-      
+
       {children}
     </MapContainer>
   );

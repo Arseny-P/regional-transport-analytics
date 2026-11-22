@@ -22,7 +22,7 @@ export interface OpenApiEdge {
   id?: string;
   from: string;
   to: string;
-  geometry?: [number, number][]; 
+  geometry?: [number, number][];
   type?: string;
   distance?: number;
   properties?: Record<string, unknown>;
@@ -49,6 +49,4 @@ export type EdgeProperties = {
   distance?: number;
 };
 
-export type RoadGraphFeature =
-  | Feature<Point, NodeProperties>
-  | Feature<LineString, EdgeProperties>;
+export type RoadGraphFeature = Feature<Point, NodeProperties> | Feature<LineString, EdgeProperties>;
