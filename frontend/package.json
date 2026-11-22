@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "check": "npm run format:check && npm run lint && npm run typecheck"
   },
   "dependencies": {
     "leaflet": "^1.9.4",

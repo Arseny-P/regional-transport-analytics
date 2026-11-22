@@ -6,25 +6,24 @@ import { useNavigate } from 'react-router-dom';
 import { Button, Message } from '@/shared/ui';
 import { RegionBoundary, useRegion, useRegions } from '@/entities/region';
 
-
-
 export function StartPage() {
   const navigate = useNavigate();
 
   const steps = [
     {
-      
-      title: "Добро пожаловать!" ,
-      description: "Сервис помогает исследовать связи между логистическими объектами выбранной территории. Постройте граф транспортной сети и изучите её показатели."
+      title: 'Добро пожаловать!',
+      description:
+        'Сервис помогает исследовать связи между логистическими объектами выбранной территории. Постройте граф транспортной сети и изучите её показатели.',
     },
     {
-      title: "Назначение",
-      description: "Цель — представить логистические объекты и потенциальные транспортные связи между ними, чтобы анализировать структуру и доступность транспортно-логистической сети одного или нескольких регионов."
-    }
-  ]
+      title: 'Назначение',
+      description:
+        'Цель — представить логистические объекты и потенциальные транспортные связи между ними, чтобы анализировать структуру и доступность транспортно-логистической сети одного или нескольких регионов.',
+    },
+  ];
   const [step, setStep] = useState(0);
   const currentStep = steps[step];
-  
+
   const [regionId, setRegionId] = useState('');
   const { regions, error: listError } = useRegions();
   const { region, error: regionError } = useRegion(regionId || null);
@@ -45,7 +44,8 @@ export function StartPage() {
 
       <label className={styles.regions}>
         Или выберите загруженный регион
-        <select className={styles.select}
+        <select
+          className={styles.select}
           value={regionId}
           onChange={(e) => setRegionId(e.target.value)}
           disabled={!regions?.length}
@@ -78,13 +78,17 @@ export function StartPage() {
       <div className={styles.MapContainer}>
         <MapView>{region && <RegionBoundary region={region} />}</MapView>
 
-        <div className={styles.overlay}>     
-        </div>
+        <div className={styles.overlay}></div>
         <section className={styles.infoCard}>
-          <Message 
-          title={currentStep.title}
-          description={currentStep.description}
-          actions={<Button onClick={() => setStep(step === 0 ? 1 : 0)}> {step === 0 ? 'Подробнее' : 'Назад'} </Button>}
+          <Message
+            title={currentStep.title}
+            description={currentStep.description}
+            actions={
+              <Button onClick={() => setStep(step === 0 ? 1 : 0)}>
+                {' '}
+                {step === 0 ? 'Подробнее' : 'Назад'}{' '}
+              </Button>
+            }
           />
         </section>
       </div>
