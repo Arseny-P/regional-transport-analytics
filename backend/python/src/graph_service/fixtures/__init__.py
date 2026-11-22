@@ -7,6 +7,7 @@ FIXTURES_DIR = os.path.dirname(os.path.abspath(__file__))
 def find_fixture_files(
     alias: str,
     custom_dir: Optional[str] = None,
+    allow_default: Optional[bool] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Ищет локальные фикстуры дорог (.graphml) и объектов (.json / .geojson)
@@ -19,6 +20,9 @@ def find_fixture_files(
 
     Возвращает кортеж (road_path, facilities_path).
     """
+    if allow_default is None:
+        allow_default = os.getenv("OSM_OFFLINE_ALLOW_DEFAULT", "false").lower() in ("true", "1", "yes")
+
     search_dirs = []
     if custom_dir and os.path.exists(custom_dir):
         search_dirs.append(custom_dir)
@@ -28,21 +32,26 @@ def find_fixture_files(
     if data_dir and os.path.exists(data_dir) and data_dir not in search_dirs:
         search_dirs.append(data_dir)
 
+    # 1. Приоритетные кандидаты, привязанные к конкретному алиасу / территории
+    alias_lower = alias.lower()
     road_candidates = [
         f"{alias}_roads.graphml",
         f"{alias}.graphml",
-        "kronshtadt_roads.graphml",
-        "default_roads.graphml",
     ]
-
     fac_candidates = [
         f"{alias}_facilities.json",
         f"{alias}_facilities.geojson",
         f"{alias}.json",
-        "kronshtadt_facilities.json",
-        "default_facilities.json",
-        "test_logistics_points.json",
     ]
+
+    if "kronshtadt" in alias_lower or "kronstadt" in alias_lower:
+        road_candidates.append("kronshtadt_roads.graphml")
+        fac_candidates.append("kronshtadt_facilities.json")
+
+    # 2. Дефолтные кандидаты — только если разрешен fallback или запрошен default/test
+    if allow_default or alias_lower in ("default", "test", "demo", "sample"):
+        road_candidates.extend(["kronshtadt_roads.graphml", "default_roads.graphml"])
+        fac_candidates.extend(["kronshtadt_facilities.json", "default_facilities.json", "test_logistics_points.json"])
 
     road_path: Optional[str] = None
     fac_path: Optional[str] = None
