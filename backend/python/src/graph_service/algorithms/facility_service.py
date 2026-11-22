@@ -17,7 +17,9 @@ from graph_service.domain.models import (
     TransportMode,
     TerritoryBounds,
 )
-from graph_service.domain.errors import FacilityValidationError
+from graph_service.domain.errors import FacilityValidationError, OfflineDataNotFoundError
+from graph_service.config import config
+from graph_service.fixtures import find_fixture_files
 import geopandas as gpd
 from graph_service.http.osm_client import execute_with_overpass_fallback
 
@@ -671,6 +673,42 @@ class FacilityService:
         self.last_audit_log = audit
         return nodes, audit
 
+    def _load_facilities_from_fixture(
+        self,
+        filepath: str,
+        bbox: Optional[TerritoryBounds] = None,
+        limit: int = 15,
+        region_id: str = "custom",
+        use_rules_64: bool = True,
+    ) -> List[LogisticsNode]:
+        """
+        Загружает логистические объекты из локального файла фикстуры (.json или .geojson).
+        """
+        if filepath.endswith(".geojson") or filepath.endswith(".gpkg"):
+            gdf = gpd.read_file(filepath)
+            if use_rules_64:
+                nodes, audit = self.select_warehouse_nodes_from_gdf(gdf, limit=limit, region_id=region_id)
+                self.last_audit_log = audit
+                return nodes
+            return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
+
+        with open(filepath, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if isinstance(data, dict) and "features" in data:
+            gdf = gpd.GeoDataFrame.from_features(data["features"])
+            if use_rules_64:
+                nodes, audit = self.select_warehouse_nodes_from_gdf(gdf, limit=limit, region_id=region_id)
+                self.last_audit_log = audit
+                return nodes
+            return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
+
+        if isinstance(data, list):
+            nodes = self.parse_and_validate_facilities(data, territory_bounds=bbox, filter_outside=False)
+            return nodes[:limit]
+
+        raise ValueError(f"Неподдерживаемый формат фикстуры объектов: {filepath}")
+
     def fetch_from_osm_bbox(
         self,
         bbox: TerritoryBounds,
@@ -681,8 +719,24 @@ class FacilityService:
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM внутри заданного BBox.
+        При наличии локальных фикстур или включенном OSM_OFFLINE_MODE загружает данные без обращения к сети.
         """
         bbox.validate()
+        alias = bbox.cache_key()
+
+        # 1. Проверка оффлайн-фикстур
+        _, fac_fixture = find_fixture_files(alias, custom_dir=config.fixtures_dir)
+        if fac_fixture and os.path.exists(fac_fixture):
+            print(f"[*] Использование оффлайн-фикстуры объектов: {fac_fixture}")
+            return self._load_facilities_from_fixture(
+                fac_fixture, bbox=bbox, limit=limit, region_id=region_id, use_rules_64=use_rules_64
+            )
+
+        if config.osm_offline_mode:
+            raise OfflineDataNotFoundError(
+                f"Включен оффлайн-режим (OSM_OFFLINE_MODE), но фикстура объектов для BBox '{alias}' не найдена."
+            )
+
         query_tags = tags or (self.WAREHOUSE_OSM_TAGS if use_rules_64 else self.DEFAULT_OSM_TAGS)
 
         print(f"[*] Поиск логистических объектов в OSM для BBox: "
@@ -719,7 +773,23 @@ class FacilityService:
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM по названию территории с умной фильтрацией.
+        При наличии локальных фикстур или включенном OSM_OFFLINE_MODE загружает данные без обращения к сети.
         """
+        alias = place_name.lower().replace(" ", "_").replace(",", "")
+
+        # 1. Проверка оффлайн-фикстур
+        _, fac_fixture = find_fixture_files(alias, custom_dir=config.fixtures_dir)
+        if fac_fixture and os.path.exists(fac_fixture):
+            print(f"[*] Использование оффлайн-фикстуры объектов для '{place_name}': {fac_fixture}")
+            return self._load_facilities_from_fixture(
+                fac_fixture, bbox=None, limit=limit, region_id=region_id, use_rules_64=use_rules_64
+            )
+
+        if config.osm_offline_mode:
+            raise OfflineDataNotFoundError(
+                f"Включен оффлайн-режим (OSM_OFFLINE_MODE), но фикстура объектов для '{place_name}' не найдена."
+            )
+
         query_tags = tags or (self.WAREHOUSE_OSM_TAGS if use_rules_64 else self.DEFAULT_OSM_TAGS)
 
         print(f"[*] Поиск логистических объектов в OSM для: '{place_name}'...")

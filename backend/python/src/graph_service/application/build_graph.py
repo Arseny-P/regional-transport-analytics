@@ -183,6 +183,13 @@ class TerritoryAnalysisService:
                 error_message=f"Ошибка валидации объектов: {fac_err}",
                 warnings=warnings,
             )
+        except OfflineDataNotFoundError as off_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка оффлайн-источника данных: {off_err}",
+                warnings=warnings,
+            )
         except Exception as fac_fetch_err:
             warnings.append(f"Не удалось получить объекты из OSM: {fac_fetch_err}")
 
