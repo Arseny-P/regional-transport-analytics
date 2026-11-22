@@ -50,7 +50,7 @@ func newTestEnvironment(t *testing.T) *testEnvironment {
 	cleanupResource(t, producer.Close)
 
 	orchestrator := usecase.NewUsecase(env.repository, env.repository, nil, slog.Default())
-	controller := httpcontroller.NewHTTPController(orchestrator, slog.Default())
+	controller := httpcontroller.NewHTTPController(orchestrator, orchestrator, nil, slog.Default())
 	env.server = httptest.NewServer(controller.Routes())
 	t.Cleanup(env.server.Close)
 

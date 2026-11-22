@@ -1,0 +1,160 @@
+{
+  "message_id": "787f501f-706b-4871-837c-0e06d1d013d8",
+  "job_id": "a1b2c3d4-e5f6-47a8-b9c0-112233445566",
+  "type": "RESULT",
+  "payload": {
+    "status": "completed",
+    "graph": {
+      "nodes": [
+        {
+          "id": "hub_1",
+          "position": [29.7712, 59.9882],
+          "attributes": {
+            "name": "Портовый терминал Запад",
+            "object_type": "warehouse",
+            "is_isolated": false,
+            "snap_distance_m": 34.3,
+            "nearest_osm_node": 9000000001
+          }
+        },
+        {
+          "id": "hub_2",
+          "position": [29.7820, 59.9925],
+          "attributes": {
+            "name": "Логистический комплекс Восток",
+            "object_type": "warehouse",
+            "is_isolated": false,
+            "snap_distance_m": 9.1,
+            "nearest_osm_node": 9000000002
+          }
+        },
+        {
+          "id": "9000000001",
+          "position": [29.771261, 59.988507],
+          "attributes": {
+            "name": "road_node_9000000001",
+            "object_type": "road_node",
+            "street_count": 2,
+            "highway": ""
+          }
+        },
+        {
+          "id": "100200",
+          "position": [29.776500, 59.990200],
+          "attributes": {
+            "name": "intersection_100200",
+            "object_type": "intersection",
+            "street_count": 3,
+            "highway": "traffic_signals"
+          }
+        },
+        {
+          "id": "9000000002",
+          "position": [29.782017, 59.992581],
+          "attributes": {
+            "name": "road_node_9000000002",
+            "object_type": "road_node",
+            "street_count": 2,
+            "highway": ""
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "conn_hub_1_9000000001_access_out",
+          "source": "hub_1",
+          "target": "9000000001",
+          "geometry": [
+            [29.7712, 59.9882],
+            [29.771261, 59.988507]
+          ],
+          "attributes": {
+            "transport_mode": "road",
+            "edge_type": "access_connector",
+            "length_m": 34.3,
+            "routes_count": 1,
+            "warehouse_id": "hub_1",
+            "road_node_id": "9000000001",
+            "direction": "origin_to_road"
+          }
+        },
+        {
+          "id": "road_9000000001_100200_0",
+          "source": "9000000001",
+          "target": "100200",
+          "geometry": [
+            [29.771261, 59.988507],
+            [29.774000, 59.989300],
+            [29.776500, 59.990200]
+          ],
+          "attributes": {
+            "transport_mode": "road",
+            "edge_type": "road",
+            "length_m": 450.2,
+            "routes_count": 1,
+            "highway": "secondary",
+            "name": "Макаровская улица",
+            "oneway": false,
+            "route_ids": ["hub_1->hub_2"]
+          }
+        },
+        {
+          "id": "road_100200_9000000002_0",
+          "source": "100200",
+          "target": "9000000002",
+          "geometry": [
+            [29.776500, 59.990200],
+            [29.779000, 59.991200],
+            [29.782017, 59.992581]
+          ],
+          "attributes": {
+            "transport_mode": "road",
+            "edge_type": "road",
+            "length_m": 520.8,
+            "routes_count": 1,
+            "highway": "primary",
+            "name": "Кронштадтское шоссе",
+            "oneway": false,
+            "route_ids": ["hub_1->hub_2"]
+          }
+        },
+        {
+          "id": "conn_9000000002_hub_2_access_in",
+          "source": "9000000002",
+          "target": "hub_2",
+          "geometry": [
+            [29.782017, 59.992581],
+            [29.7820, 59.9925]
+          ],
+          "attributes": {
+            "transport_mode": "road",
+            "edge_type": "access_connector",
+            "length_m": 9.1,
+            "routes_count": 1,
+            "warehouse_id": "hub_2",
+            "road_node_id": "9000000002",
+            "direction": "road_to_dest"
+          }
+        }
+      ]
+    },
+    "metrics": [
+      { "name": "vertex_count", "value": 5.0 },
+      { "name": "edge_count", "value": 4.0 },
+      { "name": "connected_components_count", "value": 1.0 },
+      { "name": "isolated_nodes_count", "value": 0.0 },
+      { "name": "isolated_nodes_ratio", "value": 0.0 },
+      { "name": "beta_index", "value": 0.8 },
+      { "name": "alpha_index", "value": 0.0 },
+      { "name": "gamma_index", "value": 0.4444 },
+      { "name": "avg_degree", "value": 1.6 },
+      { "name": "network_density", "value": 0.4 },
+      { "name": "avg_edge_distance_km", "value": 0.2536 },
+      { "name": "max_edge_distance_km", "value": 0.5208 },
+      { "name": "diameter_km", "value": 1.0144 },
+      { "name": "total_routes_count", "value": 1.0 },
+      { "name": "found_routes_count", "value": 1.0 },
+      { "name": "found_routes_ratio", "value": 1.0 }
+    ]
+  }
+}

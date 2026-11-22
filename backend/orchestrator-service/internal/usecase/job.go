@@ -106,3 +106,33 @@ func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
 	return "queued", true, nil
 
 }
+
+func (u *Usecase) CancelJob(ctx context.Context, jobID uuid.UUID) (domain.AnalysisResult, bool, error) {
+
+	result, err := u.jobRepository.GetAnalysisResult(ctx, jobID)
+	if err != nil {
+		return domain.AnalysisResult{}, false, err
+	}
+
+	switch result.Payload.Status {
+	case "failed", "completed":
+		return domain.AnalysisResult{}, false, domain.ErrJobAlreadyFinished
+	case "cancel_requested":
+		return result, true, nil
+	case "canceled":
+		return result, false, nil
+	}
+
+	status, err := u.jobRepository.RequestJobCancellation(ctx, jobID)
+	if err != nil {
+		return domain.AnalysisResult{}, false, err
+	}
+	switch status {
+	case "failed", "completed":
+		return domain.AnalysisResult{}, false, domain.ErrJobAlreadyFinished
+	}
+
+	result.Payload.Status = status
+
+	return result, status == "cancel_requested", nil
+}

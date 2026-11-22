@@ -117,6 +117,7 @@ class TestKafkaContract(unittest.TestCase):
                 id="e1",
                 source="n1",
                 target="n2",
+                segment_id="seg_n1_n2",
                 geometry=[[30.28, 59.91], [30.29, 59.92], [30.31, 59.93]],
                 attributes={"distance_km": 2.5},
             )
@@ -125,6 +126,7 @@ class TestKafkaContract(unittest.TestCase):
         metrics = [
             MetricItem(name="vertex_count", value=2.0),
             MetricItem(name="edge_count", value=1.0),
+            MetricItem(name="degree", value=3.0, node_id="n1"),
         ]
 
         result = ResultEventPayload(
@@ -139,7 +141,10 @@ class TestKafkaContract(unittest.TestCase):
         self.assertEqual(len(res_dict["graph"]["nodes"]), 2)
         # Проверяем [долгота, широта]
         self.assertEqual(res_dict["graph"]["nodes"][0]["position"], [30.28, 59.91])
-        self.assertEqual(len(res_dict["metrics"]), 2)
+        self.assertEqual(res_dict["graph"]["edges"][0]["segment_id"], "seg_n1_n2")
+        self.assertEqual(len(res_dict["metrics"]), 3)
+        self.assertNotIn("node_id", res_dict["metrics"][0])
+        self.assertEqual(res_dict["metrics"][2]["node_id"], "n1")
 
     def test_result_event_metrics_reject_nan_and_inf(self):
         # Защита от NaN

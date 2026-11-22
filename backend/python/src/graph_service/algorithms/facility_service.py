@@ -1,6 +1,10 @@
 import os
 import json
-from typing import List, Dict, Any, Optional
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from math import isfinite
+from numbers import Integral
+from typing import List, Dict, Any, Optional, Tuple, Set
 import networkx as nx
 import osmnx as ox
 import pandas as pd
@@ -16,6 +20,29 @@ from graph_service.domain.models import (
 from graph_service.domain.errors import FacilityValidationError
 import geopandas as gpd
 from graph_service.http.osm_client import execute_with_overpass_fallback
+
+
+WAREHOUSE_OSM_TAGS = {
+    "building": ["warehouse"],
+    "building:use": ["warehouse"],
+    "industrial": ["warehouse", "logistics"],
+    "amenity": ["warehouse"],
+}
+
+WAREHOUSE_TAGS = ("building:use", "building", "industrial")
+TAGS_TO_KEEP = (*WAREHOUSE_TAGS, "landuse", "amenity", "name", "operator", "disused", "abandoned")
+POLYGON_TYPES = {"Polygon", "MultiPolygon"}
+WAREHOUSE_WORDS = ("склад", "логист", "распределительн", "warehouse", "logistics")
+
+
+@dataclass(frozen=True)
+class WarehouseInput:
+    osm_id: str
+    tags: Mapping[str, object]
+    latitude: float | None
+    longitude: float | None
+    polygon_area_m2: float | None = None
+    enclosing_site_ids: tuple[str, ...] = ()
 
 
 class FacilityService:
@@ -48,9 +75,16 @@ class FacilityService:
         "port": ["cargo"],
     }
 
+    WAREHOUSE_OSM_TAGS = WAREHOUSE_OSM_TAGS
+    WAREHOUSE_TAGS = WAREHOUSE_TAGS
+    TAGS_TO_KEEP = TAGS_TO_KEEP
+    POLYGON_TYPES = POLYGON_TYPES
+    WAREHOUSE_WORDS = WAREHOUSE_WORDS
+
     def __init__(self, storage_dir: str = "data"):
         self.storage_dir = storage_dir
         os.makedirs(self.storage_dir, exist_ok=True)
+        self.last_audit_log: List[Dict[str, Any]] = []
 
     def parse_and_validate_facilities(
         self,
@@ -362,18 +396,294 @@ class FacilityService:
               f"{sum(1 for n in selected_nodes if n.graph_role == GraphRole.NESTED_CANDIDATE.value)} вложенных в комплексы).")
         return selected_nodes
 
+    # =========================================================================
+    # Правила отбора складов #64 (Sprint 4 Issue 2)
+    # =========================================================================
+
+    @staticmethod
+    def _text(tags: Mapping[str, object], key: str) -> str:
+        value = tags.get(key)
+        return value.strip() if isinstance(value, str) else ""
+
+    @classmethod
+    def _normalized(cls, tags: Mapping[str, object], key: str) -> str:
+        return " ".join(cls._text(tags, key).casefold().split())
+
+    @classmethod
+    def _classify(cls, tags: Mapping[str, object]) -> Tuple[str, str, str, List[str]]:
+        matched = [
+            f"{key}=warehouse"
+            for key in cls.WAREHOUSE_TAGS
+            if cls._normalized(tags, key) == "warehouse"
+        ]
+        if matched:
+            use = cls._normalized(tags, "building:use")
+            if use and use != "warehouse":
+                return "review", "", "conflicting_building_use", matched + [f"building:use={use}"]
+            if any(cls._normalized(tags, key) == "yes" for key in ("disused", "abandoned")):
+                return "review", "", "inactive_object", matched
+            kind = "building" if matched[0].startswith("building") else "site"
+            return "eligible", kind, "warehouse_tag", matched
+
+        if cls._normalized(tags, "industrial") == "logistics":
+            return "review", "", "warehouse_use_to_check", ["industrial=logistics"]
+        if cls._normalized(tags, "amenity") == "warehouse":
+            return "review", "", "warehouse_use_to_check", ["amenity=warehouse"]
+        name = cls._normalized(tags, "name")
+        if any(word in name for word in cls.WAREHOUSE_WORDS):
+            return "review", "", "warehouse_word_in_name", []
+        return "excluded", "", "no_warehouse_evidence", []
+
+    @staticmethod
+    def _footprint(obj: WarehouseInput) -> Optional[float]:
+        area = obj.polygon_area_m2
+        return area if area is not None and isfinite(area) and area > 0 else None
+
+    @classmethod
+    def select_warehouses(
+        cls,
+        objects: Iterable[WarehouseInput],
+        *,
+        region_id: str = "custom",
+        limit: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Отбор самостоятельных складов для дорожного графа согласно правилам #64.
+        Возвращает:
+          - аргументы для создания LogisticsNode (выбранные склады)
+          - журнал аудита/решений по всем OSM ID.
+        """
+        if limit is not None:
+            if isinstance(limit, bool) or not isinstance(limit, Integral) or limit < 1:
+                raise ValueError("limit должен быть положительным целым числом или None")
+
+        by_id: Dict[str, WarehouseInput] = {}
+        for obj in objects:
+            by_id.setdefault(obj.osm_id, obj)
+
+        audit: Dict[str, Dict[str, Any]] = {}
+        for osm_id, obj in by_id.items():
+            decision, kind, reason, tags = cls._classify(obj.tags)
+            if decision == "eligible":
+                lat, lon = obj.latitude, obj.longitude
+                if lat is None or lon is None or not (-90 <= lat <= 90 and -180 <= lon <= 180):
+                    decision, reason = "review", "missing_or_invalid_geometry"
+            audit[osm_id] = {
+                "osm_id": osm_id,
+                "name": cls._text(obj.tags, "name"),
+                "operator": cls._text(obj.tags, "operator"),
+                "kind": kind,
+                "decision": decision,
+                "reason": reason,
+                "matched_tags": tags,
+                "source_tags": {
+                    key: value for key, value in obj.tags.items()
+                    if isinstance(value, str) and value.strip()
+                },
+                "parent_osm_id": None,
+                "warehouse_area_m2": cls._footprint(obj) if kind == "building" else None,
+            }
+
+        # Вложенность и подтверждение принадлежности проверяются до применения лимита.
+        proposed_parents: Dict[str, str] = {}
+        ambiguous_sites: Set[str] = set()
+        for osm_id, obj in by_id.items():
+            if audit[osm_id]["decision"] != "eligible" or audit[osm_id]["kind"] != "building":
+                continue
+            plausible_sites = []
+            matching_sites = []
+            child_operator = cls._normalized(obj.tags, "operator")
+            child_name = cls._normalized(obj.tags, "name")
+
+            for site_id in set(obj.enclosing_site_ids):
+                site = audit.get(site_id)
+                if not site or site["decision"] != "eligible" or site["kind"] != "site":
+                    continue
+                site_tags = by_id[site_id].tags
+                site_operator = cls._normalized(site_tags, "operator")
+                if child_operator and site_operator and child_operator != site_operator:
+                    continue
+                plausible_sites.append(site_id)
+                same_operator = bool(child_operator and child_operator == site_operator)
+                same_name = bool(child_name and child_name == cls._normalized(site_tags, "name"))
+                if same_operator or same_name:
+                    matching_sites.append(site_id)
+
+            if len(plausible_sites) == 1 and matching_sites:
+                proposed_parents[osm_id] = matching_sites[0]
+            elif plausible_sites:
+                ambiguous_sites.update(plausible_sites)
+
+        for site_id in ambiguous_sites:
+            audit[site_id].update(decision="review", reason="ambiguous_complex_membership")
+
+        members: Dict[str, List[str]] = {}
+        for building_id, site_id in proposed_parents.items():
+            if site_id in ambiguous_sites:
+                continue
+            audit[building_id].update(
+                decision="grouped", reason="same_complex", parent_osm_id=site_id,
+            )
+            members.setdefault(site_id, []).append(building_id)
+
+        for site_id, child_ids in members.items():
+            areas = [cls._footprint(by_id[child_id]) for child_id in child_ids]
+            known_areas = [area for area in areas if area is not None]
+            if known_areas:
+                audit[site_id]["warehouse_area_m2"] = sum(known_areas)
+
+        ready = sorted(osm_id for osm_id, row in audit.items() if row["decision"] == "eligible")
+        if limit is not None and len(ready) > limit:
+            def priority(osm_id: str):
+                row = audit[osm_id]
+                area = row["warehouse_area_m2"]
+                info_count = bool(row["name"]) + bool(row["operator"])
+                return area is None, -(area or 0), -info_count, osm_id
+
+            ready.sort(key=priority)
+            for osm_id in ready[limit:]:
+                audit[osm_id].update(decision="over_limit", reason="selection_limit")
+            ready = ready[:limit]
+
+        selected: List[Dict[str, Any]] = []
+        for osm_id in ready:
+            obj, row = by_id[osm_id], audit[osm_id]
+            row["decision"] = "selected"
+            source_ids = [osm_id, *sorted(members.get(osm_id, []))]
+            node_id = "warehouse_" + osm_id.replace(":", "_").replace("/", "_")
+            label = "Складской комплекс" if row["kind"] == "site" else "Склад"
+            selected.append({
+                "id": node_id,
+                "name": row["name"] or f"{label} ({osm_id})",
+                "object_type": "warehouse",
+                "latitude": round(float(obj.latitude), 6) if obj.latitude is not None else None,
+                "longitude": round(float(obj.longitude), 6) if obj.longitude is not None else None,
+                "region_ids": [region_id],
+                "source_osm_ids": source_ids,
+                "verification_status": VerificationStatus.CANDIDATE.value,
+                "transport_modes": [TransportMode.ROAD.value],
+                "graph_role": GraphRole.NODE_CANDIDATE.value,
+                "identification_basis": {
+                    "matched_tag": row["matched_tags"][0] if row["matched_tags"] else "warehouse",
+                    "matched_tags": row["matched_tags"],
+                    "tag_strength": "strong",
+                    "warehouse_kind": row["kind"],
+                    "warehouse_area_m2": row["warehouse_area_m2"],
+                    "operator": row["operator"] or None,
+                },
+            })
+
+        return selected, [audit[osm_id] for osm_id in sorted(audit)]
+
+    @classmethod
+    def select_warehouses_from_gdf(
+        cls,
+        features: Any,
+        *,
+        region_id: str = "custom",
+        limit: Optional[int] = None,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Преобразовать выгрузку OSMnx (GeoDataFrame) и применить правила отбора #64.
+        """
+        if features is None or getattr(features, "empty", True):
+            return cls.select_warehouses([], region_id=region_id, limit=limit)
+
+        import geopandas as gpd
+
+        if getattr(features, "crs", None) is None:
+            features = features.copy()
+            features.set_crs("EPSG:4326", inplace=True)
+
+        work = features.loc[~features.index.duplicated()].to_crs("EPSG:4326")
+        if work.index.nlevels == 2:
+            work.index = [f"osm:{element}/{osm_id}" for element, osm_id in work.index]
+        else:
+            work.index = [cls._format_osm_id(idx, row) for idx, row in work.iterrows()]
+
+        geometry_column = work.geometry.name
+        geometry = work.geometry
+        valid = geometry.is_valid & ~geometry.is_empty
+        polygons = valid & geometry.geom_type.isin(cls.POLYGON_TYPES)
+        supported = polygons | (valid & geometry.geom_type.eq("Point"))
+
+        tag_rows = work.reindex(columns=cls.TAGS_TO_KEEP).to_dict(orient="index")
+        decisions = {osm_id: cls._classify(tags) for osm_id, tags in tag_rows.items()}
+        buildings = [
+            osm_id for osm_id, (decision, kind, _, _) in decisions.items()
+            if decision == "eligible" and kind == "building" and supported.loc[osm_id]
+        ]
+        sites = [
+            osm_id for osm_id, (decision, kind, _, _) in decisions.items()
+            if decision == "eligible" and kind == "site" and polygons.loc[osm_id]
+        ]
+        footprints = geometry.loc[[osm_id for osm_id in buildings if polygons.loc[osm_id]]]
+        areas = footprints.to_crs("EPSG:6933").area.to_dict() if len(footprints) else {}
+
+        enclosing: Dict[str, Tuple[str, ...]] = {}
+        if buildings and sites:
+            site_shapes = work.loc[sites, [geometry_column]].assign(site_osm_id=sites)
+            try:
+                matches = gpd.sjoin(
+                    work.loc[buildings, [geometry_column]],
+                    site_shapes,
+                    how="inner",
+                    predicate="covered_by",
+                )
+                if not matches.empty:
+                    enclosing = matches.groupby(level=0)["site_osm_id"].agg(tuple).to_dict()
+            except Exception:
+                enclosing = {}
+
+        objects = []
+        for osm_id, tags in tag_rows.items():
+            point = geometry.loc[osm_id].representative_point() if supported.loc[osm_id] else None
+            objects.append(WarehouseInput(
+                osm_id=osm_id,
+                tags=tags,
+                latitude=float(point.y) if point is not None else None,
+                longitude=float(point.x) if point is not None else None,
+                polygon_area_m2=areas.get(osm_id),
+                enclosing_site_ids=enclosing.get(osm_id, ()),
+            ))
+
+        return cls.select_warehouses(objects, region_id=region_id, limit=limit)
+
+    def select_warehouse_nodes_from_gdf(
+        self,
+        features: Any,
+        *,
+        region_id: str = "custom",
+        limit: Optional[int] = None,
+    ) -> Tuple[List[LogisticsNode], List[Dict[str, Any]]]:
+        """
+        Преобразует выгрузку OSMnx в валидированные объекты LogisticsNode по правилам #64.
+        Также сохраняет журнал аудита в self.last_audit_log.
+        """
+        selected_dicts, audit = self.select_warehouses_from_gdf(
+            features=features,
+            region_id=region_id,
+            limit=limit,
+        )
+        nodes: List[LogisticsNode] = []
+        for d in selected_dicts:
+            nodes.append(LogisticsNode(**d))
+        self.last_audit_log = audit
+        return nodes, audit
+
     def fetch_from_osm_bbox(
         self,
         bbox: TerritoryBounds,
         tags: Optional[Dict[str, Any]] = None,
         limit: int = 15,
         region_id: str = "custom",
+        use_rules_64: bool = True,
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM внутри заданного BBox.
         """
         bbox.validate()
-        query_tags = tags or self.DEFAULT_OSM_TAGS
+        query_tags = tags or (self.WAREHOUSE_OSM_TAGS if use_rules_64 else self.DEFAULT_OSM_TAGS)
 
         print(f"[*] Поиск логистических объектов в OSM для BBox: "
               f"lat=[{bbox.min_lat}, {bbox.max_lat}], lon=[{bbox.min_lon}, {bbox.max_lon}]...")
@@ -387,9 +697,14 @@ class FacilityService:
             print(f"[-] Ошибка при запросе к OSM Overpass API по BBox: {e}")
             return []
 
-        if gdf.empty:
+        if gdf is None or getattr(gdf, "empty", True):
             print("[-] Подходящих объектов в указанном BBox не найдено.")
             return []
+
+        if use_rules_64:
+            nodes, audit = self.select_warehouse_nodes_from_gdf(gdf, limit=limit, region_id=region_id)
+            print(f"[+] Из OSM по правилам #64 отобрано {len(nodes)} складов (всего проверено объектов: {len(audit)}).")
+            return nodes
 
         return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
 
@@ -399,12 +714,13 @@ class FacilityService:
         tags: Optional[Dict[str, Any]] = None,
         limit: int = 15,
         region_id: str = "ru-spb",
-        which_result: Optional[int] = None
+        which_result: Optional[int] = None,
+        use_rules_64: bool = True,
     ) -> List[LogisticsNode]:
         """
         Автоматически находит логистические/промышленные объекты в OSM по названию территории с умной фильтрацией.
         """
-        query_tags = tags or self.DEFAULT_OSM_TAGS
+        query_tags = tags or (self.WAREHOUSE_OSM_TAGS if use_rules_64 else self.DEFAULT_OSM_TAGS)
 
         print(f"[*] Поиск логистических объектов в OSM для: '{place_name}'...")
         try:
@@ -420,9 +736,14 @@ class FacilityService:
             print(f"[-] Ошибка при запросе к OSM Overpass API: {e}")
             return []
 
-        if gdf.empty:
+        if gdf is None or getattr(gdf, "empty", True):
             print("[-] Подходящих объектов в указанной локации не найдено.")
             return []
+
+        if use_rules_64:
+            nodes, audit = self.select_warehouse_nodes_from_gdf(gdf, limit=limit, region_id=region_id)
+            print(f"[+] Из OSM по правилам #64 отобрано {len(nodes)} складов (всего проверено объектов: {len(audit)}).")
+            return nodes
 
         return self._extract_nodes_from_gdf(gdf=gdf, limit=limit, region_id=region_id)
 
@@ -485,7 +806,73 @@ class FacilityService:
 
         # 3. Обратные ребра (если улица двусторонняя, v -> u)
         if road_graph.has_edge(v, u):
-            for rev_k in list(road_graph[v][u].keys()):
+            rev_candidates = list(road_graph[v][u].keys())
+            matched_rev_k = None
+            if len(rev_candidates) == 1:
+                matched_rev_k = rev_candidates[0]
+            else:
+                # Находим соответствующее встречное ребро по osmid или сходству длины
+                fwd_osmids = set()
+                f_raw = fwd_data.get("osmid")
+                if f_raw is not None:
+                    if isinstance(f_raw, list):
+                        fwd_osmids = {str(x) for x in f_raw}
+                    else:
+                        fwd_osmids = {str(f_raw)}
+
+                best_score = -1.0
+                for c_k in rev_candidates:
+                    c_data = road_graph[v][u][c_k]
+                    if c_data.get("oneway", False):
+                        continue
+                    c_osmids = set()
+                    c_raw = c_data.get("osmid")
+                    if c_raw is not None:
+                        if isinstance(c_raw, list):
+                            c_osmids = {str(x) for x in c_raw}
+                        else:
+                            c_osmids = {str(c_raw)}
+
+                    # 1. Жесткая проверка по OSM ID: разные OSM ID не могут быть встречными ветками
+                    if fwd_osmids and c_osmids:
+                        if fwd_osmids.isdisjoint(c_osmids):
+                            continue
+                        osmid_matched = True
+                    else:
+                        osmid_matched = False
+
+                    # 2. Проверка геометрии (Hausdorff distance)
+                    c_geom = c_data.get("geometry")
+                    geom_matched = False
+                    if geom is not None and c_geom is not None and isinstance(geom, LineString) and isinstance(c_geom, LineString):
+                        try:
+                            c_geom_rev = LineString(list(reversed(c_geom.coords)))
+                            if geom.hausdorff_distance(c_geom_rev) > 1e-4:
+                                continue
+                            geom_matched = True
+                        except Exception:
+                            pass
+
+                    c_len = float(c_data.get("length", 0.0))
+                    if orig_len > 0.0 and c_len > 0.0:
+                        diff = abs(orig_len - c_len) / max(orig_len, c_len)
+                        if diff > 0.05 and abs(orig_len - c_len) > 2.0:
+                            continue
+
+                    score = 0.0
+                    if osmid_matched:
+                        score += 1000.0
+                    if geom_matched:
+                        score += 500.0
+                    if orig_len > 0.0 and c_len > 0.0:
+                        score += max(0.0, 100.0 - abs(orig_len - c_len))
+
+                    if score > best_score:
+                        best_score = score
+                        matched_rev_k = c_k
+
+            if matched_rev_k is not None and not road_graph[v][u][matched_rev_k].get("oneway", False):
+                rev_k = matched_rev_k
                 rev_data = dict(road_graph[v][u][rev_k])
                 rev_geom = rev_data.get("geometry")
                 if rev_geom is not None and isinstance(rev_geom, LineString):
@@ -563,6 +950,36 @@ class FacilityService:
                     )
                 )
 
+        # 0. Валидация координат складов
+        valid_nodes: List[LogisticsNode] = []
+        invalid_nodes: List[LogisticsNode] = []
+        for n in log_nodes:
+            if (
+                n.latitude is None
+                or n.longitude is None
+                or not isfinite(n.latitude)
+                or not isfinite(n.longitude)
+                or not (-90.0 <= n.latitude <= 90.0)
+                or not (-180.0 <= n.longitude <= 180.0)
+            ):
+                n.nearest_osm_node = None
+                n.osm_node_lat = None
+                n.osm_node_lon = None
+                n.snap_distance_m = None
+                n.snap_kind = "unconnected"
+                n.access_nodes = []
+                n.is_isolated = True
+                n.isolation_reason = "Отсутствуют или некорректны координаты склада"
+                n.identification_basis["connection_status"] = "isolated"
+                n.identification_basis["isolation_reason"] = n.isolation_reason
+                n.identification_basis["snap_kind"] = "unconnected"
+                invalid_nodes.append(n)
+            else:
+                valid_nodes.append(n)
+
+        if not valid_nodes:
+            return invalid_nodes
+
         # 1. Определение основной связной компоненты (Largest Connected Component)
         # Исключаем изолированные островки, где проезд отрезан от остальной сети
         if filter_disconnected and len(road_graph.nodes) > 1:
@@ -578,8 +995,8 @@ class FacilityService:
         else:
             active_graph = road_graph
 
-        lons = [n.longitude for n in log_nodes]
-        lats = [n.latitude for n in log_nodes]
+        lons = [n.longitude for n in valid_nodes]
+        lats = [n.latitude for n in valid_nodes]
 
         # 2. Поиск ближайших вершин в связной компоненте
         primary_node_ids = ox.nearest_nodes(active_graph, X=lons, Y=lats)
@@ -598,20 +1015,21 @@ class FacilityService:
                 else:
                     edge_list = [edge_res]
 
-                if len(log_nodes) == 1 and len(edge_list) > 0 and not isinstance(edge_list[0], (list, tuple)):
+                if len(valid_nodes) == 1 and len(edge_list) > 0 and not isinstance(edge_list[0], (list, tuple)):
                     nearest_edge_tuples = [tuple(edge_list)]
                 else:
                     nearest_edge_tuples = [tuple(e) if isinstance(e, (list, tuple)) else e for e in edge_list]
             except Exception:
-                nearest_edge_tuples = [None] * len(log_nodes)
+                nearest_edge_tuples = [None] * len(valid_nodes)
         else:
-            nearest_edge_tuples = [None] * len(log_nodes)
+            nearest_edge_tuples = [None] * len(valid_nodes)
 
-        snapped_nodes: List[LogisticsNode] = []
+        snapped_nodes: List[LogisticsNode] = list(invalid_nodes)
 
-        for idx, (node, primary_id) in enumerate(zip(log_nodes, primary_node_ids)):
+        for idx, (node, primary_id) in enumerate(zip(valid_nodes, primary_node_ids)):
             primary_id_native = int(primary_id)
             split_succeeded = False
+            snap_kind = "osm_node"
             best_node_id = primary_id_native
             best_lat = float(road_graph.nodes[primary_id_native]["y"])
             best_lon = float(road_graph.nodes[primary_id_native]["x"])
@@ -656,6 +1074,7 @@ class FacilityService:
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
                                 access_pool = [u_cand]
                                 split_succeeded = True
+                                snap_kind = "osm_node"
                             elif dist_to_v < 8.0:
                                 # Проекция находится в пределах 8 метров от перекрёстка v
                                 best_node_id = v_cand
@@ -664,8 +1083,11 @@ class FacilityService:
                                 best_dist = ox.distance.great_circle(node.latitude, node.longitude, best_lat, best_lon)
                                 access_pool = [v_cand]
                                 split_succeeded = True
+                                snap_kind = "osm_node"
                             else:
                                 virtual_id = 9_000_000_000 + (idx + 1)
+                                while virtual_id in road_graph:
+                                    virtual_id += 1
                                 if self._split_edge_for_virtual_node(road_graph, u_cand, v_cand, e_key, proj_pt, cut_dist, virtual_id):
                                     best_node_id = virtual_id
                                     best_lat = proj_lat
@@ -673,6 +1095,21 @@ class FacilityService:
                                     best_dist = proj_dist_m
                                     access_pool = [virtual_id]
                                     split_succeeded = True
+                                    snap_kind = "virtual_node"
+
+                            # Не добавляем дальние концы ребра u и v в access_nodes как прямые коннекторы:
+                            # выезд на дорожное полотно происходит в точке врезки virtual_id, а далее
+                            # движение идет по дороге. Добавляем в access_nodes только независимые перекрёстки
+                            # с соседних улиц, если они строго укладываются в max_snap_distance_m.
+                            if split_succeeded and primary_id_native not in access_pool and primary_id_native in road_graph.nodes:
+                                if primary_id_native not in (u_cand, v_cand):
+                                    p_data = road_graph.nodes[primary_id_native]
+                                    dist_primary = ox.distance.great_circle(
+                                        node.latitude, node.longitude,
+                                        float(p_data["y"]), float(p_data["x"])
+                                    )
+                                    if max_snap_distance_m is None or dist_primary <= max_snap_distance_m:
+                                        access_pool.append(primary_id_native)
 
             # 2. Если врезка не удалась — резервный выбор из перекрёстков-кандидатов с защитой от тупиков
             if not split_succeeded:
@@ -745,12 +1182,17 @@ class FacilityService:
                 node.osm_node_lat = None
                 node.osm_node_lon = None
                 node.snap_distance_m = round(float(best_dist), 1)
+                node.snap_kind = "unconnected"
                 node.access_nodes = []
                 node.is_isolated = True
                 node.isolation_reason = (
                     f"Превышен лимит расстояния до автодороги: {round(float(best_dist), 1)} м > {max_snap_distance_m:.1f} м "
                     f"(объект в акватории или нет подъездных путей)"
                 )
+                node.identification_basis["connection_status"] = "isolated"
+                node.identification_basis["isolation_reason"] = node.isolation_reason
+                node.identification_basis["snap_kind"] = "unconnected"
+                node.identification_basis["snap_distance_m"] = node.snap_distance_m
                 snapped_nodes.append(node)
                 print(f"  [SmartSnap] '{node.name}' -> [!] ИЗОЛИРОВАН: расстояние до дорожной сети {node.snap_distance_m} м > {max_snap_distance_m:.1f} м (морская акватория / нет автодорог)")
                 continue
@@ -759,15 +1201,78 @@ class FacilityService:
             node.osm_node_lat = best_lat
             node.osm_node_lon = best_lon
             node.snap_distance_m = round(float(best_dist), 1)
+            node.snap_kind = snap_kind
             node.access_nodes = access_pool
             node.is_isolated = False
             node.isolation_reason = None
+            node.identification_basis["connection_status"] = "connected"
+            node.identification_basis["snap_kind"] = snap_kind
+            node.identification_basis["snap_distance_m"] = node.snap_distance_m
+            node.identification_basis["options_count"] = len(node.access_nodes)
             snapped_nodes.append(node)
 
             warning_tag = " [!] ДАЛЕКО" if best_dist > 300 else ""
-            tag = " (виртуальный узел на ребре)" if best_node_id >= 9_000_000_000 else " (перекресток)"
+            is_virt = bool(road_graph.nodes.get(best_node_id, {}).get("is_virtual", False))
+            tag = " (виртуальный узел на ребре)" if is_virt else " (перекресток)"
             print(f"  [SmartSnap] '{node.name}' -> {len(node.access_nodes)} точек подключения "
                   f"(осн. узел {best_node_id}{tag}, плечо: {node.snap_distance_m} м){warning_tag}")
 
         return snapped_nodes
+
+    @staticmethod
+    def get_snap_report(warehouses: List[LogisticsNode]) -> List[Dict[str, Any]]:
+        """
+        Формирует подробный отчет по привязке складов к дорожной сети (#64):
+        ID склада, координаты, дорожная точка, расстояние, варианты и причина отсутствия привязки.
+        """
+        report: List[Dict[str, Any]] = []
+        for w in warehouses:
+            has_snap = bool(w.nearest_osm_node is not None and not w.is_isolated)
+            kind = getattr(w, "snap_kind", None) or ("osm_node" if has_snap else "unconnected")
+            report.append({
+                "warehouse_id": w.id,
+                "name": w.name,
+                "latitude": w.latitude,
+                "longitude": w.longitude,
+                "nearest_osm_node": w.nearest_osm_node,
+                "osm_node_lat": w.osm_node_lat,
+                "osm_node_lon": w.osm_node_lon,
+                "snap_distance_m": w.snap_distance_m,
+                "snap_kind": kind,
+                "access_nodes": list(w.access_nodes),
+                "options_count": len(w.access_nodes),
+                "is_isolated": w.is_isolated,
+                "isolation_reason": w.isolation_reason or ("" if has_snap else "Точка не найдена"),
+            })
+        return report
+
+    @staticmethod
+    def get_snap_summary(warehouses: List[LogisticsNode]) -> Dict[str, Any]:
+        """
+        Формирует агрегированную статистику по привязке складов (#64).
+        """
+        total = len(warehouses)
+        connected = [w for w in warehouses if not w.is_isolated and w.nearest_osm_node is not None]
+        isolated = [w for w in warehouses if w.is_isolated or w.nearest_osm_node is None]
+
+        from collections import Counter
+        primary_counts = Counter(w.nearest_osm_node for w in connected if w.nearest_osm_node is not None)
+        shared_directions = sum(count * (count - 1) for count in primary_counts.values())
+
+        distances = [w.snap_distance_m for w in connected if w.snap_distance_m is not None]
+        avg_dist = round(sum(distances) / len(distances), 1) if distances else 0.0
+        max_dist = round(max(distances), 1) if distances else 0.0
+
+        kinds = Counter(getattr(w, "snap_kind", "unknown") for w in warehouses)
+
+        return {
+            "total_warehouses": total,
+            "connected_count": len(connected),
+            "isolated_count": len(isolated),
+            "unique_primary_nodes": len(primary_counts),
+            "shared_primary_node_directions": shared_directions,
+            "avg_snap_distance_m": avg_dist,
+            "max_snap_distance_m": max_dist,
+            "snap_kinds": dict(kinds),
+        }
 

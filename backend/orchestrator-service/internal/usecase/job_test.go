@@ -13,8 +13,13 @@ import (
 )
 
 type MockJobRepository struct {
-	storage   map[uuid.UUID]domain.Job
-	createErr error
+	storage      map[uuid.UUID]domain.Job
+	createErr    error
+	analysisRes  domain.AnalysisResult
+	analysisErr  error
+	cancelStatus domain.JobStatus
+	isErrorCatch bool
+	cancelErr    error
 }
 
 func (mockJ *MockJobRepository) GetJob(_ context.Context, jobID uuid.UUID) (domain.Job, error) {
@@ -37,7 +42,145 @@ func (mockJ *MockJobRepository) CreateJob(_ context.Context, job *domain.Job) er
 }
 
 func (mockJ *MockJobRepository) GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error) {
-	return domain.AnalysisResult{}, nil
+	if mockJ.analysisErr != nil {
+		return domain.AnalysisResult{}, mockJ.analysisErr
+	}
+	return mockJ.analysisRes, nil
+}
+
+func (mockJ *MockJobRepository) RequestJobCancellation(context.Context, uuid.UUID) (domain.JobStatus, error) {
+	if mockJ.isErrorCatch {
+		return mockJ.cancelStatus, nil
+	}
+	mockJ.isErrorCatch = true
+	return mockJ.cancelStatus, mockJ.cancelErr
+}
+
+func TestCancelJob(t *testing.T) {
+	id := uuid.New()
+	testTable := []struct {
+		TestName                 string
+		JobID                    uuid.UUID
+		AnalysisResPayloadStatus domain.JobStatus
+		CancelStatus             domain.JobStatus
+		ExpectedJobStatus        domain.JobStatus
+		ExpectedPending          bool
+		AnalysisErr              error
+		CancelErr                error
+		ExpectedErr              error
+	}{
+		{
+			TestName:                 "Успешный запрос отмены выполняющейся задачи",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "running",
+			CancelStatus:             "cancel_requested",
+			ExpectedJobStatus:        "cancel_requested",
+			ExpectedPending:          true,
+		},
+		{
+			TestName:                 "Запрос отмены задачи в очереди",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "queued",
+			CancelStatus:             "cancel_requested",
+			ExpectedJobStatus:        "cancel_requested",
+			ExpectedPending:          true,
+		},
+		{
+			TestName:                 "Успешная обработка повторной отмены",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "cancel_requested",
+			CancelStatus:             "cancel_requested",
+			ExpectedJobStatus:        "cancel_requested",
+			ExpectedPending:          true,
+		},
+		{
+			TestName:                 "Задача уже отменена",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "canceled",
+			CancelStatus:             "canceled",
+			ExpectedJobStatus:        "canceled",
+		},
+
+		{
+			TestName:                 "Конфликт отмены задачи со статусом failed",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "failed",
+			ExpectedJobStatus:        "",
+			ExpectedErr:              domain.ErrJobAlreadyFinished,
+		},
+
+		{
+			TestName:                 "Конфликт отмены задачи со статусом completed",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "completed",
+			ExpectedJobStatus:        "",
+			ExpectedErr:              domain.ErrJobAlreadyFinished,
+		},
+
+		{
+			TestName:                 "Задача завершилась перед транзакцией отмены",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "running",
+			CancelStatus:             "completed",
+			ExpectedJobStatus:        "",
+			ExpectedErr:              domain.ErrJobAlreadyFinished,
+		},
+		{
+			TestName:                 "Задача отменена перед транзакцией отмены",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "running",
+			CancelStatus:             "canceled",
+			ExpectedJobStatus:        "canceled",
+		},
+		{
+			TestName:    "Задача не найдена",
+			JobID:       id,
+			AnalysisErr: domain.ErrJobNotFound,
+			ExpectedErr: domain.ErrJobNotFound,
+		},
+		{
+			TestName:    "Ошибка чтения результата",
+			JobID:       id,
+			AnalysisErr: domain.ErrInternalDB,
+			ExpectedErr: domain.ErrInternalDB,
+		},
+		{
+			TestName:                 "Ошибка транзакции отмены",
+			JobID:                    id,
+			AnalysisResPayloadStatus: "running",
+			CancelErr:                domain.ErrInternalDB,
+			ExpectedErr:              domain.ErrInternalDB,
+		},
+	}
+
+	for _, tt := range testTable {
+		t.Run(tt.TestName, func(t *testing.T) {
+			mockjR := MockJobRepository{
+				analysisRes: domain.AnalysisResult{
+					JobID: tt.JobID,
+					Payload: domain.AnalysisPayload{
+						Status: tt.AnalysisResPayloadStatus,
+					},
+				},
+				analysisErr:  tt.AnalysisErr,
+				cancelStatus: tt.CancelStatus,
+				cancelErr:    tt.CancelErr,
+			}
+			usecaseService := NewUsecase(&mockjR, nil, nil, slog.Default())
+
+			result, pending, err := usecaseService.CancelJob(context.Background(), tt.JobID)
+
+			if tt.ExpectedErr != nil {
+				require.ErrorIs(t, err, tt.ExpectedErr)
+			} else {
+				require.NoError(t, err)
+			}
+
+			assert.Equal(t, tt.ExpectedJobStatus, result.Payload.Status)
+			assert.Equal(t, tt.ExpectedPending, pending)
+		})
+	}
+
 }
 
 func TestCreateJob(t *testing.T) {

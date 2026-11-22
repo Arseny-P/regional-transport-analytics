@@ -172,6 +172,7 @@ class EdgePayload:
     id: str
     source: str
     target: str
+    segment_id: Optional[str] = None
     geometry: Optional[List[List[float]]] = None  # [[lon, lat], ...]
     attributes: Optional[Dict[str, Any]] = None
 
@@ -181,6 +182,8 @@ class EdgePayload:
             "source": str(self.source),
             "target": str(self.target),
         }
+        if self.segment_id is not None:
+            res["segment_id"] = str(self.segment_id)
         if self.geometry is not None:
             res["geometry"] = [
                 [float(pt[0]), float(pt[1])] for pt in self.geometry
@@ -206,13 +209,17 @@ class GraphPayload:
 class MetricItem:
     name: str
     value: float
+    node_id: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
         # Защита от NaN / Infinity по контракту
         val = float(self.value)
         if not math.isfinite(val):
             raise ValueError(f"Метрика '{self.name}' содержит недопустимое нечисловое значение: {self.value}")
-        return {"name": self.name, "value": round(val, 4)}
+        res: Dict[str, Any] = {"name": self.name, "value": round(val, 4)}
+        if self.node_id is not None:
+            res["node_id"] = str(self.node_id)
+        return res
 
 
 @dataclass

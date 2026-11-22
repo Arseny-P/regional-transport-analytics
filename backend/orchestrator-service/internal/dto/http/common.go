@@ -1,5 +1,7 @@
 package httpdto
 
-type Identifier = string
+import "orchestrator-service/internal/dto"
+
+type Identifier = dto.Identifier
 
 type JobID = Identifier

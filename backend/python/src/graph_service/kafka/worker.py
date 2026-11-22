@@ -274,7 +274,10 @@ class AnalysisWorker:
             if log_graph is None:
                 # Fallback, если объект графа не был передан в памяти
                 alias = bbox.cache_key()
-                log_graph = self.analysis_service.logistics_service.load_graphml(filename=f"{alias}_logistics")
+                try:
+                    log_graph = self.analysis_service.logistics_service.load_graphml(filename=f"{alias}_route_roads")
+                except Exception:
+                    log_graph = self.analysis_service.logistics_service.load_graphml(filename=f"{alias}_logistics")
 
             graph_payload = GraphSerializer.serialize(log_graph)
 

@@ -100,18 +100,52 @@ func (p *DB) CreateJob(ctx context.Context, job *domain.Job) error {
 	if err != nil {
 		return fmt.Errorf("encode outbox payload: %w: %w", domain.ErrInternalServer, err)
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO outbox (job_id,command_type,payload) VALUES($1,$2,$3)`,
-		job.JobID,
-		"START",
-		payload,
-	)
+	err = insertOutboxCommand(ctx, tx, job.JobID, "START", payload)
+
 	if err != nil {
-		return fmt.Errorf("insert outbox command: %w: %w", domain.ErrInternalDB, err)
+		return err
 	}
 
-	if err = tx.Commit(ctx); err != nil {
+	err = tx.Commit(ctx)
+	if err != nil {
 		return fmt.Errorf("commit job transaction: %w: %w", domain.ErrInternalDB, err)
 	}
 	return nil
 
+}
+
+func (p *DB) RequestJobCancellation(ctx context.Context, jobID uuid.UUID) (domain.JobStatus, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return "", fmt.Errorf("begin cancellation transaction: %w: %w", domain.ErrInternalDB, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var status domain.JobStatus
+	err = tx.QueryRow(ctx, `SELECT job_status FROM jobs WHERE id = $1 FOR UPDATE`, jobID).Scan(&status)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", domain.ErrJobNotFound
+		}
+		return "", fmt.Errorf("lock job for cancellation: %w: %w", domain.ErrInternalDB, err)
+	}
+
+	if status != "queued" && status != "running" {
+		return status, nil
+	}
+	_, err = tx.Exec(ctx, `UPDATE jobs SET job_status = 'cancel_requested' WHERE id = $1`, jobID)
+	if err != nil {
+		return "", fmt.Errorf("request job cancellation: %w: %w", domain.ErrInternalDB, err)
+	}
+
+	err = insertOutboxCommand(ctx, tx, jobID, "CANCEL", []byte(`{}`))
+	if err != nil {
+		return "", err
+	}
+
+	err = tx.Commit(ctx)
+	if err != nil {
+		return "", fmt.Errorf("commit cancellation transaction: %w: %w", domain.ErrInternalDB, err)
+	}
+	return "cancel_requested", nil
 }

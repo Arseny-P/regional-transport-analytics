@@ -67,6 +67,13 @@ func ReturnErrorRespWithCode(err error) (int, httpdto.Error) {
 			Code: "invalid_region_id", Field: "region_id",
 			Message: "region_id должен быть UUID",
 		}
+	}
+
+	return returnDomainErrorRespWithCode(err)
+}
+
+func returnDomainErrorRespWithCode(err error) (int, httpdto.Error) {
+	switch {
 	case errors.Is(err, domain.ErrInvalidRegionFile):
 		return http.StatusUnprocessableEntity, httpdto.Error{
 			Code: "invalid_region_file", Field: "file",
@@ -102,6 +109,17 @@ func ReturnErrorRespWithCode(err error) (int, httpdto.Error) {
 		return http.StatusInternalServerError, httpdto.InternalError{
 			Code:    "storage_error",
 			Message: "Не удалось прочитать данные региона",
+		}
+	case errors.Is(err, domain.ErrJobAlreadyFinished):
+		return http.StatusConflict, httpdto.Conflict{
+			Code: "job_already_finished", Field: "job_id",
+			Message: "Завершённую задачу нельзя отменить",
+		}
+
+	case errors.Is(err, domain.ErrHeartbeatTimeoutExceeded):
+		return http.StatusOK, httpdto.Error{
+			Code:    "heartbeat_timeout_exceeded",
+			Message: "Heartbeat не поступал более 10 секунд. Срок подтверждения активности истёк",
 		}
 	case errors.Is(err, domain.ErrJobConflict):
 		return http.StatusConflict, httpdto.Conflict{

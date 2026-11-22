@@ -44,7 +44,7 @@ func (hc *HTTPController) AddRegionHandler() http.HandlerFunc {
 			hc.writeRegionError(w, r, err)
 			return
 		}
-		result, err := hc.usecaseOrchestrator.AddRegion(r.Context(), header.Filename, filePath, collection)
+		result, err := hc.regionUsecase.AddRegion(r.Context(), header.Filename, filePath, collection)
 		if err != nil {
 			hc.writeRegionError(w, r, err)
 			return
@@ -60,7 +60,7 @@ func (hc *HTTPController) AddRegionHandler() http.HandlerFunc {
 
 func (hc *HTTPController) GetRegionsHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		regions, err := hc.usecaseOrchestrator.GetRegions(r.Context())
+		regions, err := hc.regionUsecase.GetRegions(r.Context())
 		if err != nil {
 			hc.writeRegionError(w, r, err)
 			return
@@ -82,7 +82,7 @@ func (hc *HTTPController) GetRegionHandler() http.HandlerFunc {
 			hc.writeError(w, errInvalidRegionPathID)
 			return
 		}
-		region, err := hc.usecaseOrchestrator.GetRegion(r.Context(), regionID)
+		region, err := hc.regionUsecase.GetRegion(r.Context(), regionID)
 		if err != nil {
 			hc.writeRegionError(w, r, err)
 			return

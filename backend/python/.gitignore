@@ -18,6 +18,7 @@ kafka-go-python-contract.md
 data/*.graphml
 data/*.geojson
 data/*_response.json
+!data/example_road_graph_response.json
 data/example_response.json
 data/kronshtadt_network.*
 data/central_district.*

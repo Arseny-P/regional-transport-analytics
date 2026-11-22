@@ -7,7 +7,17 @@ import (
 	"orchestrator-service/internal/domain"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
+
+func insertOutboxCommand(ctx context.Context, tx pgx.Tx, jobID uuid.UUID, commandType string, payload []byte) error {
+	_, err := tx.Exec(ctx, `INSERT INTO outbox (job_id,command_type,payload) VALUES ($1,$2,$3)`,
+		jobID, commandType, payload)
+	if err != nil {
+		return fmt.Errorf("insert outbox command: %w: %w", domain.ErrInternalDB, err)
+	}
+	return nil
+}
 
 func (p *DB) GetOutboxMessages(ctx context.Context, excessMessages []uuid.UUID) ([]domain.OutboxMessage, error) {
 

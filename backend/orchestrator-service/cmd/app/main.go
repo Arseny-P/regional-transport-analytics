@@ -148,7 +148,8 @@ func runApp(cfg *config.Config, logger *slog.Logger) error {
 	startupCancel()
 
 	orchestrator := usecase.NewUsecase(repository, repository, storage, logger.With("component", "analysis"))
-	controller := httpcontroller.NewHTTPController(orchestrator, logger.With("component", "http"))
+	analysisWorker := usecase.NewAnalysisWorker(repository, logger.With("component", "heartbeat"))
+	controller := httpcontroller.NewHTTPController(orchestrator, orchestrator, analysisWorker, logger.With("component", "http"))
 	worker := usecase.NewOutboxWorker(producer, repository, logger.With("component", "outbox"))
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	var workers sync.WaitGroup
@@ -162,6 +163,12 @@ func runApp(cfg *config.Config, logger *slog.Logger) error {
 		worker.Run(workerCtx)
 	}()
 	logger.Info("outbox worker started")
+	workers.Add(1)
+	go func() {
+		defer workers.Done()
+		analysisWorker.Run(workerCtx)
+	}()
+	logger.Info("analysis heartbeat worker started")
 
 	const consumerCount = 5
 	for i := 0; i < consumerCount; i++ {
@@ -184,6 +191,7 @@ func runApp(cfg *config.Config, logger *slog.Logger) error {
 
 	server := http.Server{
 		Addr: cfg.HTTP.Address, Handler: controller.Routes(),
+		BaseContext:       func(net.Listener) context.Context { return workerCtx },
 		ReadHeaderTimeout: 5 * time.Second, ReadTimeout: cfg.HTTP.TimeOut,
 		WriteTimeout: cfg.HTTP.TimeOut, IdleTimeout: 60 * time.Second,
 	}

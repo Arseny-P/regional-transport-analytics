@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"orchestrator-service/internal/domain"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -31,6 +32,22 @@ func (p *DB) CreateAnalysisRes(ctx context.Context, inboxMessage *domain.InboxMe
 		return nil
 	}
 
+	var jobStatus string
+	err = tx.QueryRow(ctx, `SELECT job_status FROM jobs WHERE id = $1 FOR UPDATE`, inboxMessage.JobID).Scan(&jobStatus)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("read analysis job status: %w: %w", domain.ErrJobNotFound, err)
+		}
+		return fmt.Errorf("read analysis job status: %w: %w", domain.ErrInternalDB, err)
+	}
+
+	if (jobStatus == "cancel_requested" && inboxMessage.Payload.Status != "canceled") || jobStatus == "canceled" {
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return fmt.Errorf("commit inbox transaction: %w: %w", domain.ErrInternalDB, commitErr)
+		}
+		return nil
+	}
+
 	var errorCode, errorMessage string
 	if inboxMessage.Payload.Error != nil {
 		errorCode = inboxMessage.Payload.Error.Code
@@ -45,6 +62,20 @@ func (p *DB) CreateAnalysisRes(ctx context.Context, inboxMessage *domain.InboxMe
 		return domain.ErrJobNotFound
 	}
 
+	err = saveAnalysisGraphAndMetrics(ctx, tx, inboxMessage)
+	if err != nil {
+		return err
+	}
+
+	err = tx.Commit(ctx)
+
+	if err != nil {
+		return fmt.Errorf("commit inbox transaction: %w: %w", domain.ErrInternalDB, err)
+	}
+	return nil
+}
+
+func saveAnalysisGraphAndMetrics(ctx context.Context, tx pgx.Tx, inboxMessage *domain.InboxMessage) error {
 	if inboxMessage.Payload.Graph != nil {
 		graphPayload, marshalErr := json.Marshal(inboxMessage.Payload.Graph)
 		if marshalErr != nil {
@@ -70,8 +101,5 @@ func (p *DB) CreateAnalysisRes(ctx context.Context, inboxMessage *domain.InboxMe
 		}
 	}
 
-	if err = tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit inbox transaction: %w: %w", domain.ErrInternalDB, err)
-	}
 	return nil
 }

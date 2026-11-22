@@ -23,15 +23,26 @@ type Attributes = Record<string, unknown>;
 export interface GraphNode {
   id: string;
   position: Position;
-  attributes?: Attributes;
+  attributes?: Attributes & {
+    object_type?: 'warehouse' | 'intersection' | 'road_node';
+    name?: string;
+    is_isolated?: boolean;
+    isolation_reason?: string;
+  };
 }
 
 export interface GraphEdge {
+  segment_id?: string;
   id: string;
   source: string;
   target: string;
   geometry?: Position[];
-  attributes?: Attributes;
+  attributes?: Attributes & {
+    edge_type?: 'road' | 'access_connector';
+    length_m?: number;
+    oneway?: boolean;
+    routes_count?: number;
+  };
 }
 
 export interface Graph {
@@ -40,6 +51,7 @@ export interface Graph {
 }
 
 export interface Metric {
+  node_id?: string;
   name: string;
   value: number;
 }
@@ -51,4 +63,13 @@ export interface AnalysisResult extends AnalysisStatus {
 
 export function isFinalState(state: JobState): boolean {
   return (FINAL_JOB_STATES as readonly JobState[]).includes(state);
+}
+
+export function selectMetrics(metrics: Metric[]) {
+  const globalMetrics = metrics.filter((m) => m.node_id === undefined);
+  const metricsByNodeId = new Map<string, Metric[]>();
+  for (const m of metrics)
+    if (m.node_id !== undefined)
+      metricsByNodeId.set(m.node_id, [...(metricsByNodeId.get(m.node_id) ?? []), m]);
+  return { globalMetrics, metricsByNodeId };
 }
