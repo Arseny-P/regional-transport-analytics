@@ -19,11 +19,7 @@ export function getNodeMetricRows(node: GraphNode, metrics: readonly Metric[]) {
   );
   const kind = node.attributes?.object_type;
   const definitions =
-    kind === 'warehouse'
-      ? warehouseMetrics
-      : kind === 'intersection'
-        ? intersectionMetrics
-        : [];
+    kind === 'warehouse' ? warehouseMetrics : kind === 'intersection' ? intersectionMetrics : [];
 
   return [{ id: 'degree', label: 'Степень вершины' }, ...definitions].map((definition) => ({
     ...definition,

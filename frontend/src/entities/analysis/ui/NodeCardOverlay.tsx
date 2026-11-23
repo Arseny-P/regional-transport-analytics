@@ -33,8 +33,7 @@ export function NodeCardOverlay({
       const { offsetWidth: width, offsetHeight: height } = card;
       const above = point.y - gap - height;
       const below = point.y + gap;
-      const preferredTop =
-        above >= padding || size.y - below < point.y - gap ? above : below;
+      const preferredTop = above >= padding || size.y - below < point.y - gap ? above : below;
       const x = Math.max(padding, Math.min(point.x - width / 2, size.x - width - padding));
       const y = Math.max(padding, Math.min(preferredTop, size.y - height - padding));
       DomUtil.setPosition(card, pixelPoint(x, y));

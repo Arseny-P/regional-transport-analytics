@@ -85,7 +85,8 @@ function buildGraph({ first_point, second_point }: AnalysisBody['area']): Graph 
       is_isolated: i === NODES_COUNT - 1,
       name: `Node ${i}`,
       degree: 0,
-      object_type: i === 0 || i === NODES_COUNT - 1 ? 'warehouse' : i % 3 === 0 ? 'intersection' : 'road_node',
+      object_type:
+        i === 0 || i === NODES_COUNT - 1 ? 'warehouse' : i % 3 === 0 ? 'intersection' : 'road_node',
     },
   }));
   const edges: Graph['edges'] = nodes.slice(1, -1).flatMap((node, i) => [
