@@ -87,6 +87,29 @@ class TerritoryAnalysisService:
         road_alias = f"{alias_base}_roads"
         logistics_alias = f"{alias_base}_logistics"
 
+        # -----------------------------------------------------------------
+        # 1.1 Валидация пользовательских объектов (до загрузки дорожной сети)
+        # -----------------------------------------------------------------
+        user_nodes: List[LogisticsNode] = []
+        try:
+            if request.facility_source in [FacilitySourceType.USER_DEFINED.value, FacilitySourceType.HYBRID.value]:
+                if not request.facilities:
+                    if request.facility_source == FacilitySourceType.USER_DEFINED.value:
+                        raise FacilityValidationError("Передан пустой список пользовательских объектов ('facilities').")
+                else:
+                    user_nodes = facility_service.parse_and_validate_facilities(
+                        facilities_data=request.facilities,
+                        territory_bounds=request.bbox,
+                        filter_outside=False,
+                    )
+        except (FacilityValidationError, ValueError) as fac_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка валидации объектов: {fac_err}",
+                warnings=warnings,
+            )
+
         if cancellation_token:
             cancellation_token.check_cancelled()
 
@@ -145,23 +168,11 @@ class TerritoryAnalysisService:
             cancellation_token.check_cancelled()
 
         # -----------------------------------------------------------------
-        # 3. Подготовка и валидация логистических объектов
+        # 3. Подготовка и валидация логистических объектов OSM (если требуются)
         # -----------------------------------------------------------------
-        user_nodes: List[LogisticsNode] = []
         osm_nodes: List[LogisticsNode] = []
 
         try:
-            if request.facility_source in [FacilitySourceType.USER_DEFINED.value, FacilitySourceType.HYBRID.value]:
-                if not request.facilities:
-                    if request.facility_source == FacilitySourceType.USER_DEFINED.value:
-                        raise FacilityValidationError("Передан пустой список пользовательских объектов ('facilities').")
-                else:
-                    user_nodes = facility_service.parse_and_validate_facilities(
-                        facilities_data=request.facilities,
-                        territory_bounds=request.bbox,
-                        filter_outside=False,
-                    )
-
             if request.facility_source in [FacilitySourceType.OSM.value, FacilitySourceType.HYBRID.value]:
                 if request.territory_type == TerritorySourceType.BBOX.value:
                     osm_nodes = facility_service.fetch_from_osm_bbox(

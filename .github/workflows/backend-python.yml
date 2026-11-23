@@ -39,7 +39,5 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Pytest
-        env:
-          OSM_OFFLINE_MODE: "true"
         run: |
           pytest tests/ -v

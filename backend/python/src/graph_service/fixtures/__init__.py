@@ -44,7 +44,7 @@ def find_fixture_files(
         f"{alias}.json",
     ]
 
-    if "kronshtadt" in alias_lower or "kronstadt" in alias_lower:
+    if "kronshtadt" in alias_lower or "kronstadt" in alias_lower or "кронштадт" in alias_lower:
         road_candidates.append("kronshtadt_roads.graphml")
         fac_candidates.append("kronshtadt_facilities.json")
 
