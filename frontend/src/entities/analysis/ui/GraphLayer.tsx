@@ -3,7 +3,7 @@ import { latLngBounds, type LatLngTuple } from 'leaflet';
 import { CircleMarker, Polyline, Tooltip, useMap } from 'react-leaflet';
 import type { Position } from '@/shared/api';
 import { nodeColor } from '../lib/nodeColor';
-import type { Graph, Metric } from '../model/types';
+import type { Graph, Metric, NodeSelection } from '../model/types';
 
 const WAREHOUSE_COLOR = '#0f62fe';
 const INTERSECTION_COLOR = '#475569';
@@ -14,10 +14,11 @@ interface GraphLayerProps {
   graph: Graph;
   metrics: Metric[];
   colorBy?: string;
-  onNodeHover?: (nodeId: string) => void;
+  selection: NodeSelection | null;
+  onNodeSelect: (selection: NodeSelection) => void;
 }
 
-export function GraphLayer({ graph, metrics, colorBy, onNodeHover }: GraphLayerProps) {
+export function GraphLayer({ graph, metrics, colorBy, selection, onNodeSelect }: GraphLayerProps) {
   const map = useMap();
 
   const { bounds, roads, markers } = useMemo(() => {
@@ -46,9 +47,25 @@ export function GraphLayer({ graph, metrics, colorBy, onNodeHover }: GraphLayerP
     return { bounds, roads, markers };
   }, [graph]);
 
+  const southWest = bounds.getSouthWest();
+  const northEast = bounds.getNorthEast();
+  const south = southWest?.lat;
+  const west = southWest?.lng;
+  const north = northEast?.lat;
+  const east = northEast?.lng;
+
   useEffect(() => {
-    if (bounds.isValid()) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 17 });
-  }, [map, bounds]);
+    if (south === undefined || west === undefined || north === undefined || east === undefined) {
+      return;
+    }
+    map.fitBounds(
+      [
+        [south, west],
+        [north, east],
+      ],
+      { padding: [40, 40], maxZoom: 17 }
+    );
+  }, [map, south, west, north, east]);
 
   const values = new Map<string, number>();
   for (const { node_id, name, value } of metrics) {
@@ -72,7 +89,12 @@ export function GraphLayer({ graph, metrics, colorBy, onNodeHover }: GraphLayerP
       ))}
 
       {markers.map(({ node, position }) => {
-        const warehouse = node.attributes?.object_type === 'warehouse';
+        const { id } = node;
+        const type = node.attributes?.object_type;
+        const warehouse = type === 'warehouse';
+        const selectable = warehouse || type === 'intersection';
+        const selected = selection?.id === id && selection.type === type;
+        const radius = warehouse ? 9 : 6;
         const value = values.get(node.id);
         const defaultColor = warehouse ? WAREHOUSE_COLOR : INTERSECTION_COLOR;
         const color = value === undefined ? defaultColor : nodeColor(value, min, max);
@@ -80,9 +102,14 @@ export function GraphLayer({ graph, metrics, colorBy, onNodeHover }: GraphLayerP
           <CircleMarker
             key={node.id}
             center={position}
-            radius={warehouse ? 9 : 6}
-            pathOptions={{ color, fillColor: color, fillOpacity: 0.9 }}
-            eventHandlers={{ mouseover: () => onNodeHover?.(node.id) }}
+            radius={selected ? radius + 3 : radius}
+            pathOptions={{
+              color: selected ? '#111827' : color,
+              weight: selected ? 4 : 3,
+              fillColor: color,
+              fillOpacity: 0.9,
+            }}
+            eventHandlers={selectable ? { click: () => onNodeSelect({ id, type }) } : undefined}
           >
             {value !== undefined && <Tooltip>{`${colorBy}: ${value}`}</Tooltip>}
           </CircleMarker>
