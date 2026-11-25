@@ -1,0 +1,68 @@
+.legend {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  width: min(230px, calc(100% - 40px));
+  max-height: calc(100% - 40px);
+  overflow: auto;
+  padding: 12px 15px;
+  border-radius: 8px;
+  background: var(--general-bg);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 30%);
+  font-size: 14px;
+}
+
+.items {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.items li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.symbol,
+.line {
+  width: 24px;
+  flex-shrink: 0;
+}
+
+.symbol {
+  display: grid;
+  place-items: center;
+}
+
+.line {
+  height: 2px;
+}
+
+.dot {
+  border: 1px solid var(--text-secondary);
+  border-radius: 50%;
+}
+
+.metric {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.scale {
+  height: 8px;
+  border-radius: 4px;
+}
+
+.scaleLabels {
+  display: flex;
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
