@@ -14,9 +14,11 @@ from graph_service.domain.models import (
     LogisticsNode,
     RouteStatus,
 )
+from graph_service.config import config
 from graph_service.domain.errors import (
     TerritoryValidationError,
     FacilityValidationError,
+    OfflineDataNotFoundError,
 )
 from graph_service.algorithms.road_network_service import RoadNetworkService
 from graph_service.algorithms.facility_service import FacilityService
@@ -85,11 +87,34 @@ class TerritoryAnalysisService:
         road_alias = f"{alias_base}_roads"
         logistics_alias = f"{alias_base}_logistics"
 
+        # -----------------------------------------------------------------
+        # 1.1 Валидация пользовательских объектов (до загрузки дорожной сети)
+        # -----------------------------------------------------------------
+        user_nodes: List[LogisticsNode] = []
+        try:
+            if request.facility_source in [FacilitySourceType.USER_DEFINED.value, FacilitySourceType.HYBRID.value]:
+                if not request.facilities:
+                    if request.facility_source == FacilitySourceType.USER_DEFINED.value:
+                        raise FacilityValidationError("Передан пустой список пользовательских объектов ('facilities').")
+                else:
+                    user_nodes = facility_service.parse_and_validate_facilities(
+                        facilities_data=request.facilities,
+                        territory_bounds=request.bbox,
+                        filter_outside=False,
+                    )
+        except (FacilityValidationError, ValueError) as fac_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка валидации объектов: {fac_err}",
+                warnings=warnings,
+            )
+
         if cancellation_token:
             cancellation_token.check_cancelled()
 
         # -----------------------------------------------------------------
-        # 2. Получение дорожной сети (кэш или OSM)
+        # 2. Получение дорожной сети (кэш, оффлайн-фикстура или OSM)
         # -----------------------------------------------------------------
         road_graph_path = os.path.join(storage_dir, f"{road_alias}.graphml")
         road_graph: Optional[nx.MultiDiGraph] = None
@@ -99,16 +124,30 @@ class TerritoryAnalysisService:
                 print(f"[*] Использование локального кэша дорожной сети: {road_graph_path}")
                 road_graph = road_service.load_graphml(filename=road_alias)
             else:
-                if request.territory_type == TerritorySourceType.BBOX.value:
-                    road_graph = road_service.fetch_and_build_from_bbox(bbox=request.bbox)
-                else:
-                    road_graph = road_service.fetch_and_build(
-                        place_name=request.place_name,
-                        which_result=request.which_result,
-                    )
+                from graph_service.fixtures import find_fixture_files
+                road_fixture, _ = find_fixture_files(alias=road_alias, custom_dir=config.fixtures_dir)
+                if not road_fixture:
+                    road_fixture, _ = find_fixture_files(alias=alias_base, custom_dir=config.fixtures_dir)
 
-                if request.save_artifacts:
-                    road_service.save_graphml(road_graph, filename=road_alias)
+                if road_fixture and (config.osm_offline_mode or not request.refetch):
+                    print(f"[*] Использование оффлайн-фикстуры дорожной сети: {road_fixture}")
+                    road_graph = road_service.load_graphml(filename=road_fixture)
+                elif config.osm_offline_mode:
+                    raise OfflineDataNotFoundError(
+                        f"Включен оффлайн-режим (OSM_OFFLINE_MODE), но фикстура дорожной сети "
+                        f"для территории '{alias_base}' не найдена."
+                    )
+                else:
+                    if request.territory_type == TerritorySourceType.BBOX.value:
+                        road_graph = road_service.fetch_and_build_from_bbox(bbox=request.bbox)
+                    else:
+                        road_graph = road_service.fetch_and_build(
+                            place_name=request.place_name,
+                            which_result=request.which_result,
+                        )
+
+                    if request.save_artifacts:
+                        road_service.save_graphml(road_graph, filename=road_alias)
         except Exception as osm_err:
             return AnalysisResponse(
                 status=AnalysisStatus.ERROR.value,
@@ -129,23 +168,11 @@ class TerritoryAnalysisService:
             cancellation_token.check_cancelled()
 
         # -----------------------------------------------------------------
-        # 3. Подготовка и валидация логистических объектов
+        # 3. Подготовка и валидация логистических объектов OSM (если требуются)
         # -----------------------------------------------------------------
-        user_nodes: List[LogisticsNode] = []
         osm_nodes: List[LogisticsNode] = []
 
         try:
-            if request.facility_source in [FacilitySourceType.USER_DEFINED.value, FacilitySourceType.HYBRID.value]:
-                if not request.facilities:
-                    if request.facility_source == FacilitySourceType.USER_DEFINED.value:
-                        raise FacilityValidationError("Передан пустой список пользовательских объектов ('facilities').")
-                else:
-                    user_nodes = facility_service.parse_and_validate_facilities(
-                        facilities_data=request.facilities,
-                        territory_bounds=request.bbox,
-                        filter_outside=False,
-                    )
-
             if request.facility_source in [FacilitySourceType.OSM.value, FacilitySourceType.HYBRID.value]:
                 if request.territory_type == TerritorySourceType.BBOX.value:
                     osm_nodes = facility_service.fetch_from_osm_bbox(
@@ -165,6 +192,13 @@ class TerritoryAnalysisService:
                 status=AnalysisStatus.ERROR.value,
                 territory=territory_meta,
                 error_message=f"Ошибка валидации объектов: {fac_err}",
+                warnings=warnings,
+            )
+        except OfflineDataNotFoundError as off_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка оффлайн-источника данных: {off_err}",
                 warnings=warnings,
             )
         except Exception as fac_fetch_err:

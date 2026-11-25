@@ -26,6 +26,11 @@ class KafkaSettings:
 class ServiceConfig:
     data_dir: str = os.getenv("DATA_DIR", "data")
     cache_dir: str = os.getenv("CACHE_DIR", "cache")
+    fixtures_dir: str = os.getenv(
+        "FIXTURES_DIR",
+        os.path.join(os.path.dirname(__file__), "fixtures"),
+    )
+    osm_offline_mode: bool = os.getenv("OSM_OFFLINE_MODE", "false").lower() in ("true", "1", "yes")
     default_osm_facilities_limit: int = 500
     warehouse_neighbor_radius_m: float = 2000.0
     overpass: OverpassSettings = field(default_factory=OverpassSettings)

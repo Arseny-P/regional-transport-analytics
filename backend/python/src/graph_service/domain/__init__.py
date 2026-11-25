@@ -6,6 +6,7 @@ from .errors import (
     OSMUnavailableError,
     GraphBuildError,
     MetricsCalculationError,
+    OfflineDataNotFoundError,
 )
 from .models import (
     TransportMode,
@@ -31,6 +32,7 @@ __all__ = [
     "OSMUnavailableError",
     "GraphBuildError",
     "MetricsCalculationError",
+    "OfflineDataNotFoundError",
     "TransportMode",
     "RouteStatus",
     "VerificationStatus",
