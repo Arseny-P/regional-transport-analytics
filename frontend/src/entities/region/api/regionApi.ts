@@ -8,3 +8,9 @@ export function listRegions(): Promise<RegionList> {
 export function getRegion(regionId: string): Promise<Region> {
   return request(`/regions/${encodeURIComponent(regionId)}`);
 }
+
+export function uploadRegion(file: File): Promise<Region> {
+  const body = new FormData();
+  body.append('file', file);
+  return request('/regions', { method: 'POST', body });
+}

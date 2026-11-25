@@ -9,4 +9,5 @@ export type {
   RegionSummary,
 } from './model/types';
 export { useRegion, useRegions } from './model/useRegions';
+export { uploadRegion } from './api/regionApi';
 export { RegionBoundary } from './ui/RegionBoundary';
