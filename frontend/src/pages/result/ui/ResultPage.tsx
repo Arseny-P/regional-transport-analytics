@@ -10,6 +10,9 @@ import {
   selectMetrics,
   isFinalState,
   METRIC_LABELS,
+  REGION_METRIC_NAMES,
+  NODE_METRIC_NAMES,
+  formatMetricValue,
   useAnalysisJob,
   type JobState,
   type NodeSelection,
@@ -67,6 +70,8 @@ function JobResult({ jobId }: { jobId: string }) {
   if (selection && !selectedNode) setSelection(null);
 
   const { globalMetrics, metricsByNodeId } = selectMetrics(result?.metrics ?? []);
+  const globalValues = new Map(globalMetrics.map(({ name, value }) => [name, value]));
+  const hasRegionalMetrics = REGION_METRIC_NAMES.some((name) => globalValues.has(name));
   const [longitude, latitude] = selectedNode?.position ?? [];
   const popupPosition = useMemo<[number, number] | null>(
     () => (latitude === undefined || longitude === undefined ? null : [latitude, longitude]),
@@ -101,42 +106,41 @@ function JobResult({ jobId }: { jobId: string }) {
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
 
       <MetricSelect
+        names={NODE_METRIC_NAMES}
         metrics={[
           ...new Map(
-            (result?.metrics ?? []).filter((m) => m.node_id !== undefined).map((m) => [m.name, m])
+            (result?.metrics ?? [])
+              .filter(
+                (m) => m.node_id !== undefined && NODE_METRIC_NAMES.some((name) => name === m.name)
+              )
+              .map((m) => [m.name, m])
           ).values(),
         ]}
         value={metric}
         onChange={setMetric}
       />
-      <h4>Простые метрики графа:</h4>
-      {globalMetrics.length ? (
-        <>
-          <table className={styles.metricsTable}>
-            <thead>
-              <tr>
-                <th scope="col">Показатель</th>
-                <th scope="col">Значение</th>
-              </tr>
-            </thead>
-            <tbody>
-              {' '}
-              {globalMetrics.map(({ name, value }) => (
-                <tr key={name}>
-                  <th scope="row">{METRIC_LABELS[name] ?? name}</th>
-                  <td>{value ?? 'Не рассчитано'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      ) : (
+      <h4>Показатели региона</h4>
+      <table className={styles.metricsTable}>
+        <thead>
+          <tr>
+            <th scope="col">Показатель</th>
+            <th scope="col">Значение</th>
+          </tr>
+        </thead>
+        <tbody>
+          {REGION_METRIC_NAMES.map((name) => (
+            <tr key={name}>
+              <th scope="row">{METRIC_LABELS[name] ?? name}</th>
+              <td>{formatMetricValue(name, globalValues.get(name))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!hasRegionalMetrics && !isFinal && (
         <p className={styles.muted}>
-          {isFinal
-            ? 'Метрики не рассчитаны.'
-            : hasGraph
-              ? 'Метрики рассчитываются...'
-              : 'Метрики будут доступны после построения графа.'}
+          {hasGraph
+            ? 'Ожидаем значения метрик.'
+            : 'Значения появятся после построения графа и расчёта метрик.'}
         </p>
       )}
     </>

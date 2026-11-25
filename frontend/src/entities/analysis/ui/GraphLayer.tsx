@@ -2,6 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { latLngBounds, type LatLngTuple } from 'leaflet';
 import { CircleMarker, Polyline, Tooltip, useMap } from 'react-leaflet';
 import type { Position } from '@/shared/api';
+import { METRIC_LABELS, formatMetricValue } from '../config/metricLabels';
 import { nodeColor } from '../lib/nodeColor';
 import type { Graph, Metric, NodeSelection } from '../model/types';
 
@@ -111,7 +112,9 @@ export function GraphLayer({ graph, metrics, colorBy, selection, onNodeSelect }:
             }}
             eventHandlers={selectable ? { click: () => onNodeSelect({ id, type }) } : undefined}
           >
-            {value !== undefined && <Tooltip>{`${colorBy}: ${value}`}</Tooltip>}
+            {value !== undefined && (
+              <Tooltip>{`${METRIC_LABELS[colorBy ?? ''] ?? colorBy}: ${formatMetricValue(colorBy ?? '', value)}`}</Tooltip>
+            )}
           </CircleMarker>
         );
       })}
