@@ -5,6 +5,7 @@ export type {
   Graph,
   JobState,
   Metric,
+  NodeSelection,
 } from './model/types';
 export { isFinalState } from './model/types';
 export { useAnalysisJob } from './model/useAnalysisJob';

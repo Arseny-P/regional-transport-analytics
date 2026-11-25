@@ -20,11 +20,16 @@ export interface AnalysisStatus {
 
 type Attributes = Record<string, unknown>;
 
+export interface NodeSelection {
+  id: string;
+  type: 'warehouse' | 'intersection';
+}
+
 export interface GraphNode {
   id: string;
   position: Position;
   attributes?: Attributes & {
-    object_type?: 'warehouse' | 'intersection' | 'road_node';
+    object_type?: NodeSelection['type'] | 'road_node';
     name?: string;
     is_isolated?: boolean;
     isolation_reason?: string;
