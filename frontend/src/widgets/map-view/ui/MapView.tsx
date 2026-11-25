@@ -78,7 +78,7 @@ export function MapView({
         );
       })}
 
-      <RoadGraphLegend />
+      <RoadGraphLegend className={styles.legend} />
 
       {onAreaSelect && (
         <SelectArea

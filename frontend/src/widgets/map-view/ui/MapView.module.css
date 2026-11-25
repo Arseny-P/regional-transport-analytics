@@ -1,21 +1,20 @@
 .map {
   width: 100%;
-  height: 100vh;
+  height: 100%;
   position: relative;
+  z-index: 0;
 }
 
+/* Размещение легенды поверх карты. */
 .legend {
   position: absolute;
   bottom: 20px;
   right: 20px;
-  background-color: rgba(255, 255, 255, 0.95);
-  padding: 15px;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  z-index: 1000;
-  font-size: 14px;
-  font-family: sans-serif;
-  min-width: 180px;
+  z-index: 650;
+  width: max-content;
+  max-width: calc(100% - 40px);
+  max-height: calc(100% - 40px);
+  overflow: auto;
 }
 
 .areaInfo {

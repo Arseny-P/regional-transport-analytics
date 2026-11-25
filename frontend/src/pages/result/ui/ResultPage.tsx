@@ -1,11 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Popup } from 'react-leaflet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
 import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
+  getNodeMetricRows,
+  NodeCardOverlay,
   selectMetrics,
   isFinalState,
   METRIC_LABELS,
@@ -154,14 +155,7 @@ function JobResult({ jobId }: { jobId: string }) {
           />
         )}
         {selectedNode && popupPosition && (
-          <Popup
-            position={popupPosition}
-            offset={[0, -8]}
-            autoPan={false}
-            closeButton={false}
-            closeOnClick={false}
-            closeOnEscapeKey={false}
-          >
+          <NodeCardOverlay position={popupPosition}>
             <NodeCard
               node={{
                 id: selectedNode.id,
@@ -171,14 +165,10 @@ function JobResult({ jobId }: { jobId: string }) {
                   ? (selectedNode.attributes.isolation_reason ?? 'Изолирован')
                   : undefined,
               }}
-              metrics={(metricsByNodeId.get(selectedNode.id) ?? []).map(({ name, value }) => ({
-                id: name,
-                label: METRIC_LABELS[name] ?? name,
-                value,
-              }))}
+              metrics={getNodeMetricRows(selectedNode, metricsByNodeId.get(selectedNode.id) ?? [])}
               onClose={() => setSelection(null)}
             />
-          </Popup>
+          </NodeCardOverlay>
         )}
       </MapView>
       {isWaiting && (
