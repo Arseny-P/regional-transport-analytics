@@ -41,3 +41,8 @@ class GraphBuildError(GraphServiceError):
 class MetricsCalculationError(GraphServiceError):
     """Ошибка расчёта метрик графа."""
     code = "metrics_calculation_failed"
+
+
+class OfflineDataNotFoundError(GraphServiceError, FileNotFoundError):
+    """Локальные фикстуры дорог или объектов не найдены в оффлайн-режиме (OSM_OFFLINE_MODE)."""
+    code = "offline_data_not_found"

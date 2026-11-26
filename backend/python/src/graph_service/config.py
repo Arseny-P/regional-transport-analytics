@@ -11,7 +11,7 @@ class OverpassSettings:
         "https://overpass.private.coffee/api",
         "https://maps.mail.ru/osm/tools/overpass/api",
     ])
-    requests_timeout_sec: int = 60
+    requests_timeout_sec: int = 300
 
 
 @dataclass
@@ -26,7 +26,13 @@ class KafkaSettings:
 class ServiceConfig:
     data_dir: str = os.getenv("DATA_DIR", "data")
     cache_dir: str = os.getenv("CACHE_DIR", "cache")
-    default_osm_facilities_limit: int = 100
+    fixtures_dir: str = os.getenv(
+        "FIXTURES_DIR",
+        os.path.join(os.path.dirname(__file__), "fixtures"),
+    )
+    osm_offline_mode: bool = os.getenv("OSM_OFFLINE_MODE", "false").lower() in ("true", "1", "yes")
+    default_osm_facilities_limit: int = 500
+    warehouse_neighbor_radius_m: float = 2000.0
     overpass: OverpassSettings = field(default_factory=OverpassSettings)
     kafka: KafkaSettings = field(default_factory=KafkaSettings)
 
