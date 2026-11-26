@@ -12,7 +12,6 @@ export const METRIC_LABELS: Readonly<Record<string, string>> = {
   vertex_count: 'Число вершин',
   edge_count: 'Число рёбер',
   avg_degree: 'Средняя степень вершины',
-  degree: 'Степень вершины',
 };
 
 export const REGION_METRIC_NAMES = [
@@ -23,7 +22,6 @@ export const REGION_METRIC_NAMES = [
 ] as const;
 
 export const NODE_METRIC_NAMES = [
-  'degree',
   'nearest_warehouse_distance_m',
   'nearby_warehouse_count',
   'pagerank',
@@ -49,3 +47,16 @@ export function formatMetricValue(name: string, value: number | null | undefined
   const suffix = unit ?? format?.unit;
   return suffix ? `${number} ${suffix}` : number;
 }
+
+// Краткие пояснения выбранной метрики для легенды карты.
+export const METRIC_DESCRIPTIONS: Readonly<Record<string, string>> = {
+  nearest_warehouse_distance_m:
+    'Кратчайшее расстояние по дорогам от выбранного склада до другого склада с учётом направления движения. Служебные связи с дорогой в расстояние не входят.',
+  nearby_warehouse_count:
+    'Число других складов, до которых можно доехать по направленному дорожному маршруту в пределах заданного радиуса. Порог одинаков для всех складов анализа.',
+  pagerank: 'Структурная значимость перекрёстка с учётом связей и направлений дорожной сети.',
+  betweenness_centrality:
+    'Показывает, как часто перекрёсток встречается на кратчайших по длине путях между дорожными вершинами.',
+  route_fraction:
+    'Доля найденных направленных маршрутов между складами, проходящих через этот перекрёсток. Отображается в процентах.',
+};

@@ -149,7 +149,12 @@ function JobResult({ jobId }: { jobId: string }) {
 
   return (
     <ResultLayout sidebar={sidebar}>
-      <MapView showRegions={false} legend={<GraphLegend coloredByMetric={!!metric} />}>
+      <MapView
+        showRegions={false}
+        legend={
+          <GraphLegend colorBy={metric || undefined} graph={graph} metrics={result?.metrics} />
+        }
+      >
         {graph && (
           <GraphLayer
             metrics={result?.metrics ?? []}

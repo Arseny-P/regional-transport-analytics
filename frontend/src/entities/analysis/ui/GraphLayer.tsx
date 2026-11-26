@@ -3,7 +3,7 @@ import { latLngBounds, type LatLngTuple } from 'leaflet';
 import { CircleMarker, Polyline, Tooltip, useMap } from 'react-leaflet';
 import type { Position } from '@/shared/api';
 import { METRIC_LABELS, formatMetricValue } from '../config/metricLabels';
-import { nodeColor } from '../lib/nodeColor';
+import { nodeColor, nodeMetricScale } from '../lib/nodeColor';
 import type { Graph, Metric, NodeSelection } from '../model/types';
 
 const WAREHOUSE_COLOR = '#6D4BD1';
@@ -68,20 +68,7 @@ export function GraphLayer({ graph, metrics, colorBy, selection, onNodeSelect }:
     );
   }, [map, south, west, north, east]);
 
-  const values = new Map<string, number>();
-  for (const { node_id, name, value } of metrics) {
-    if (node_id !== undefined && name === colorBy && Number.isFinite(value)) {
-      if (!values.has(node_id)) values.set(node_id, value);
-    }
-  }
-  let min = Infinity;
-  let max = -Infinity;
-  for (const { node } of markers) {
-    const value = values.get(node.id);
-    if (value === undefined) continue;
-    min = Math.min(min, value);
-    max = Math.max(max, value);
-  }
+  const { values, min, max } = nodeMetricScale(graph.nodes, metrics, colorBy);
 
   return (
     <>

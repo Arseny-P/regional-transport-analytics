@@ -12,7 +12,7 @@ export function getNodeMetricRows(node: GraphNode, metrics: readonly Metric[]) {
   const names =
     kind === 'warehouse' ? warehouseMetrics : kind === 'intersection' ? intersectionMetrics : [];
 
-  return ['degree', ...names].map((id) => ({
+  return names.map((id) => ({
     id,
     label: METRIC_LABELS[id] ?? id,
     value: values.get(id) ?? null,

@@ -1,5 +1,7 @@
 /* Содержимое легенды результата. Размещение задаёт MapView. */
 .legend {
+  width: 280px;
+  max-width: 100%;
   padding: 16px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -67,4 +69,52 @@
   margin: 12px 0 0;
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+/* Пояснение и шкала выбранной метрики. */
+.metric {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.description {
+  margin: 0 0 12px;
+  line-height: 1.45;
+}
+
+.gradient {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(
+    to right,
+    hsl(220, 80%, 45%),
+    hsl(165, 80%, 45%),
+    hsl(110, 80%, 45%),
+    hsl(55, 80%, 45%),
+    hsl(0, 80%, 45%)
+  );
+}
+
+.range {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.equalValue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+
+.equalColor {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background-color: hsl(0, 80%, 45%);
 }
