@@ -39,6 +39,19 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
 
+  kafka-init:
+    image: apache/kafka:4.1.1
+    depends_on:
+      kafka:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for topic in analysis.commands analysis.results analysis.results.dlq; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+            --create --if-not-exists --topic "$$topic" --partitions 5 --replication-factor 1
+        done
+
   minio:
     build:
       context: ./backend/orchestrator-service
@@ -78,8 +91,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
       graph-service:
@@ -102,15 +115,26 @@ services:
       KAFKA_RESULTS_TOPIC: analysis.results
       DATA_DIR: /app/data
       CACHE_DIR: /app/cache
+      OSM_OFFLINE_MODE: "${OSM_OFFLINE_MODE:-false}"
       PYTHONUNBUFFERED: "1"
     volumes:
       - graph_data:/app/data
       - graph_cache:/app/cache
     depends_on:
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     stop_grace_period: 15s
+
+  e2e:
+    profiles: [e2e]
+    build:
+      context: ./backend/orchestrator-service
+      dockerfile: Dockerfile.e2e
+    network_mode: "service:orchestrator"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
 
   frontend:
     build:
