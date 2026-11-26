@@ -39,6 +39,19 @@ services:
     volumes:
       - kafka_data:/var/lib/kafka/data
 
+  kafka-init:
+    image: apache/kafka:4.1.1
+    depends_on:
+      kafka:
+        condition: service_started
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        for topic in analysis.commands analysis.results analysis.results.dlq; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 \
+            --create --if-not-exists --topic "$$topic" --partitions 5 --replication-factor 1
+        done
+
   minio:
     build:
       context: ./backend/orchestrator-service
@@ -78,8 +91,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
       minio:
         condition: service_healthy
       graph-service:
@@ -108,8 +121,8 @@ services:
       - graph_data:/app/data
       - graph_cache:/app/cache
     depends_on:
-      kafka:
-        condition: service_started
+      kafka-init:
+        condition: service_completed_successfully
     restart: unless-stopped
     stop_grace_period: 15s
 
