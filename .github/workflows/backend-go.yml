@@ -58,3 +58,17 @@ jobs:
           cache-dependency-path: backend/orchestrator-service/go.sum
       - name: Go tests
         run: make test
+
+  e2e:
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Set up local Compose environment
+        run: cp .env.example .env
+      - name: Run backend E2E tests
+        run: make e2e
+      - name: Stop backend stack
+        if: always()
+        run: docker compose down

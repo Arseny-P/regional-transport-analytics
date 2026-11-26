@@ -102,6 +102,7 @@ services:
       KAFKA_RESULTS_TOPIC: analysis.results
       DATA_DIR: /app/data
       CACHE_DIR: /app/cache
+      OSM_OFFLINE_MODE: "${OSM_OFFLINE_MODE:-false}"
       PYTHONUNBUFFERED: "1"
     volumes:
       - graph_data:/app/data
@@ -111,6 +112,16 @@ services:
         condition: service_started
     restart: unless-stopped
     stop_grace_period: 15s
+
+  e2e:
+    profiles: [e2e]
+    build:
+      context: ./backend/orchestrator-service
+      dockerfile: Dockerfile.e2e
+    network_mode: "service:orchestrator"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
 
   frontend:
     build:
