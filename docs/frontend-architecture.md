@@ -84,4 +84,6 @@ src/
 
 ### Моки API
 
-Пока Go API не готов, в dev-режиме запросы `/regions*` и `/analysis*` перехватывает MSW (`src/app/mocks`). Моки включаются переменной `VITE_API_MOCKS=true` в `.env`.
+Для разработки с Go API задайте `VITE_API_MOCKS=false` в `.env`. При `VITE_API_URL=/api` Vite проксирует запросы `/api/*` на `http://localhost:8080`.
+
+Для локальной разработки без бэкенда задайте `VITE_API_MOCKS=true`. В dev-режиме MSW (`src/app/mocks`) перехватывает запросы к эндпоинтам `/regions*` и `/analysis*`.
