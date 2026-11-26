@@ -6,7 +6,7 @@ import { METRIC_LABELS, formatMetricValue } from '../config/metricLabels';
 import { nodeColor } from '../lib/nodeColor';
 import type { Graph, Metric, NodeSelection } from '../model/types';
 
-const WAREHOUSE_COLOR = '#0f62fe';
+const WAREHOUSE_COLOR = '#6D4BD1';
 const INTERSECTION_COLOR = '#475569';
 
 const toLatLng = ([lng, lat]: Position): LatLngTuple => [lat, lng];

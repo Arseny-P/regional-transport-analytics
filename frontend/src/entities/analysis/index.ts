@@ -20,3 +20,7 @@ export { NodeCard } from './ui/NodeCard';
 export { selectMetrics } from './model/types';
 export { getNodeMetricRows } from './config/nodeMetrics';
 export { NodeCardOverlay } from './ui/NodeCardOverlay';
+
+export { GraphLegend } from './ui/GraphLegend';
+
+export { analysisErrorMessage } from './lib/analysisErrorMessage';

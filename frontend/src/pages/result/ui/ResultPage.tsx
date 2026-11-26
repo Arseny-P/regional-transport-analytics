@@ -5,6 +5,8 @@ import { MapView } from '@/widgets/map-view';
 import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
+  analysisErrorMessage,
+  GraphLegend,
   getNodeMetricRows,
   NodeCardOverlay,
   selectMetrics,
@@ -40,7 +42,7 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
       <h3 className={styles.title}>Результаты анализа</h3>
       {sidebar}
 
-      <Button className={styles.newAnalysisButton} onClick={() => navigate('/analysis')}>
+      <Button className={styles.newAnalysisButton} onClick={() => navigate('/start')}>
         Новый анализ
       </Button>
     </>
@@ -61,6 +63,7 @@ function JobResult({ jobId }: { jobId: string }) {
   const [selection, setSelection] = useState<NodeSelection | null>(null);
 
   const job = status ?? result;
+  const failureMessage = job?.error ? analysisErrorMessage(job.error) : null;
   const graph = result?.graph;
   const selectedNode =
     selection &&
@@ -81,9 +84,7 @@ function JobResult({ jobId }: { jobId: string }) {
   const isFinal = !!job && isFinalState(job.status);
   const isWaiting = !notFound && !graph && (!isFinal || !result);
   const hasGraph = !!graph?.nodes.length;
-  const changeArea = (
-    <Button onClick={() => navigate('/analysis')}>Изменить область или параметры</Button>
-  );
+  const changeArea = <Button onClick={() => navigate('/start')}>Выбрать регион</Button>;
   const waitingTitle = requestError
     ? 'Восстанавливаем соединение'
     : job?.status === 'queued'
@@ -101,7 +102,7 @@ function JobResult({ jobId }: { jobId: string }) {
       <p className={styles.status} data-status={job?.status} role="status">
         Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}
       </p>
-      {job?.error && <p className={styles.error}>{job.error.message}</p>}
+      {failureMessage && <p className={styles.error}>{failureMessage}</p>}
       {requestError && <p className={styles.warning}>Нет связи с сервером, повторяем запрос...</p>}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
 
@@ -148,7 +149,7 @@ function JobResult({ jobId }: { jobId: string }) {
 
   return (
     <ResultLayout sidebar={sidebar}>
-      <MapView>
+      <MapView showRegions={false} legend={<GraphLegend coloredByMetric={!!metric} />}>
         {graph && (
           <GraphLayer
             metrics={result?.metrics ?? []}
@@ -208,7 +209,7 @@ function JobResult({ jobId }: { jobId: string }) {
                   : 'Данные не найдены'
             }
             description={
-              job?.error?.message ??
+              failureMessage ??
               (job?.status === 'canceled'
                 ? 'Можно изменить параметры и запустить анализ снова.'
                 : 'В выбранной области не найдено объектов. Измените область или параметры анализа.')
@@ -230,7 +231,7 @@ export function ResultPage() {
       <ResultLayout
         sidebar={<p className={styles.error}>Нет данных анализа. Запустите новый анализ.</p>}
       >
-        <MapView />
+        <MapView showRegions={false} legend={<GraphLegend />} />
         <div className={styles.overlay}>
           <Message
             title="Нет данных анализа"

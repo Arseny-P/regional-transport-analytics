@@ -20,6 +20,8 @@ interface MapViewProps {
   center?: LatLngTuple;
   zoom?: number;
   children?: ReactNode;
+  legend?: ReactNode;
+  showRegions?: boolean;
   onAreaSelect?: (area: BBox | null) => void;
   point1?: string;
   point2?: string;
@@ -37,6 +39,8 @@ export function MapView({
   center = DEFAULT_MAP_CENTER,
   zoom = DEFAULT_MAP_ZOOM,
   children,
+  legend = <RoadGraphLegend />,
+  showRegions = true,
   onAreaSelect,
   point1 = '',
   point2 = '',
@@ -46,6 +50,7 @@ export function MapView({
   const [regionsData, setRegionsData] = useState<Record<string, RegionData>>({});
 
   useEffect(() => {
+    if (!showRegions) return;
     REGIONS_CONFIG.forEach(async (region) => {
       const [graph, points] = await Promise.all([
         fetchRoadGraph(region.url),
@@ -57,28 +62,29 @@ export function MapView({
         [region.id]: { graph, points },
       }));
     });
-  }, []);
+  }, [showRegions]);
 
   return (
     <MapContainer center={center} zoom={zoom} className={styles.map} zoomControl={false}>
       <TileLayer url={OSM_TILE_URL} attribution="" />
 
-      {REGIONS_CONFIG.map((region) => {
-        const data = regionsData[region.id];
-        if (!data?.graph) return null;
+      {showRegions &&
+        REGIONS_CONFIG.map((region) => {
+          const data = regionsData[region.id];
+          if (!data?.graph) return null;
 
-        return (
-          <RoadGraphLayer
-            key={region.id}
-            data={data.graph}
-            regionColor={region.color}
-            pointColor={region.pointColor}
-            regionLabel={region.label}
-          />
-        );
-      })}
+          return (
+            <RoadGraphLayer
+              key={region.id}
+              data={data.graph}
+              regionColor={region.color}
+              pointColor={region.pointColor}
+              regionLabel={region.label}
+            />
+          );
+        })}
 
-      <RoadGraphLegend className={styles.legend} />
+      <div className={styles.legend}>{legend}</div>
 
       {onAreaSelect && (
         <SelectArea

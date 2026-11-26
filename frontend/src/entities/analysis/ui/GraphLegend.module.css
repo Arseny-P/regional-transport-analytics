@@ -1,0 +1,70 @@
+/* Содержимое легенды результата. Размещение задаёт MapView. */
+.legend {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--general-bg);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 15%);
+  font-size: 14px;
+}
+
+.title {
+  margin: 0 0 12px;
+  font-size: 14px;
+}
+
+.items {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 28px auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.warehouse,
+.intersection,
+.selected {
+  display: block;
+  justify-self: center;
+  border-radius: 50%;
+}
+
+.warehouse {
+  width: 18px;
+  height: 18px;
+  background-color: #6d4bd1;
+}
+
+.intersection {
+  width: 12px;
+  height: 12px;
+  background-color: #475569;
+}
+
+.road {
+  height: 2px;
+  background-color: #555;
+}
+
+.selected {
+  width: 18px;
+  height: 18px;
+  border: 4px solid #111827;
+  background-color: var(--general-bg);
+}
+
+.note {
+  max-width: 220px;
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
