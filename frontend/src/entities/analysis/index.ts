@@ -23,4 +23,8 @@ export { NodeCardOverlay } from './ui/NodeCardOverlay';
 
 export { GraphLegend } from './ui/GraphLegend';
 
-export { analysisErrorMessage } from './lib/analysisErrorMessage';
+export {
+  analysisErrorMessage,
+  analysisRequestErrorMessage,
+  isRetryableAnalysisRequest,
+} from './lib/analysisErrorMessage';

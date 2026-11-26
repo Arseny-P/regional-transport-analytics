@@ -2,10 +2,13 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
+import { useRegions } from '@/entities/region';
 import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
   analysisErrorMessage,
+  analysisRequestErrorMessage,
+  isRetryableAnalysisRequest,
   GraphLegend,
   getNodeMetricRows,
   NodeCardOverlay,
@@ -59,11 +62,18 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const { status, result, requestError } = useAnalysisJob(jobId);
+  const [searchParams] = useSearchParams();
+  const { regions } = useRegions();
+  const regionId =
+    searchParams.get('region_id') ?? (regions?.length === 1 ? regions[0].region_id : null);
+  const returnToArea = () =>
+    navigate(regionId ? `/analysis?region_id=${encodeURIComponent(regionId)}` : '/start');
   const [metric, setMetric] = useState('');
   const [selection, setSelection] = useState<NodeSelection | null>(null);
 
   const job = status ?? result;
-  const failureMessage = job?.error ? analysisErrorMessage(job.error) : null;
+  const failureMessage =
+    job?.error && job.error.code !== 'analysis_canceled' ? analysisErrorMessage(job.error) : null;
   const graph = result?.graph;
   const selectedNode =
     selection &&
@@ -81,10 +91,13 @@ function JobResult({ jobId }: { jobId: string }) {
     [latitude, longitude]
   );
   const notFound = requestError instanceof ApiError && requestError.status === 404;
+  const requestFailed = !!requestError && !isRetryableAnalysisRequest(requestError);
   const isFinal = !!job && isFinalState(job.status);
-  const isWaiting = !notFound && !graph && (!isFinal || !result);
+  const isWaiting = !requestFailed && !graph && (!isFinal || !result);
   const hasGraph = !!graph?.nodes.length;
-  const changeArea = <Button onClick={() => navigate('/start')}>Выбрать регион</Button>;
+  const changeArea = <Button onClick={() => navigate('/start')}>Начать новый анализ</Button>;
+  const cancelControl =
+    job && !isFinal ? <Button onClick={returnToArea}>Отменить анализ</Button> : null;
   const waitingTitle = requestError
     ? 'Восстанавливаем соединение'
     : job?.status === 'queued'
@@ -99,11 +112,26 @@ function JobResult({ jobId }: { jobId: string }) {
     <p className={styles.error}>Задача не найдена. Запустите новый анализ.</p>
   ) : (
     <>
-      <p className={styles.status} data-status={job?.status} role="status">
-        Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}
+      <p
+        className={styles.status}
+        data-status={requestFailed ? 'failed' : job?.status}
+        role="status"
+      >
+        Статус: {requestFailed ? 'Ошибка' : job ? STATUS_LABELS[job.status] : 'подключение...'}
       </p>
       {failureMessage && <p className={styles.error}>{failureMessage}</p>}
-      {requestError && <p className={styles.warning}>Нет связи с сервером, повторяем запрос...</p>}
+      {requestError && (
+        <p className={styles.warning} role="alert">
+          {analysisRequestErrorMessage(requestError)}
+        </p>
+      )}
+      {job?.status === 'cancel_requested' && (
+        <p role="status">Отмена запрошена. Ожидаем подтверждения сервера.</p>
+      )}
+      {!isWaiting && cancelControl}
+      {job?.status === 'canceled' && hasGraph && (
+        <p role="status">Анализ отменён. Доступен ранее построенный граф.</p>
+      )}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
 
       <MetricSelect
@@ -137,7 +165,7 @@ function JobResult({ jobId }: { jobId: string }) {
           ))}
         </tbody>
       </table>
-      {!hasRegionalMetrics && !isFinal && (
+      {!hasRegionalMetrics && !isFinal && !requestFailed && (
         <p className={styles.muted}>
           {hasGraph
             ? 'Ожидаем значения метрик.'
@@ -187,23 +215,26 @@ function JobResult({ jobId }: { jobId: string }) {
             title={waitingTitle}
             description={
               requestError
-                ? 'Нет связи с сервером. Повторяем запрос автоматически.'
-                : 'Ожидаем готовности графа выбранной территории.'
+                ? `${analysisRequestErrorMessage(requestError)} Повторяем запрос автоматически.`
+                : job?.status === 'cancel_requested'
+                  ? 'Запрос на отмену отправлен. Дождитесь подтверждения сервера.'
+                  : 'Ожидаем готовности графа выбранной территории.'
             }
             icon={<Spinner size="large" text="" />}
+            actions={cancelControl}
           />
         </div>
       )}
-      {notFound && (
+      {requestFailed && (
         <div className={styles.overlay}>
           <Message
-            title="Задача не найдена"
-            description="Запустите новый анализ выбранной области."
+            title={notFound ? 'Анализ не найден' : 'Не удалось получить результат'}
+            description={analysisRequestErrorMessage(requestError)}
             actions={changeArea}
           />
         </div>
       )}
-      {!notFound && isFinal && !!result && !hasGraph && (
+      {!requestFailed && isFinal && !!result && !hasGraph && (
         <div className={styles.overlay}>
           <Message
             title={
@@ -215,9 +246,11 @@ function JobResult({ jobId }: { jobId: string }) {
             }
             description={
               failureMessage ??
-              (job?.status === 'canceled'
-                ? 'Можно изменить параметры и запустить анализ снова.'
-                : 'В выбранной области не найдено объектов. Измените область или параметры анализа.')
+              (job?.status === 'failed'
+                ? 'Не удалось завершить анализ. Попробуйте запустить его снова.'
+                : job?.status === 'canceled'
+                  ? 'Можно изменить параметры и запустить анализ снова.'
+                  : 'В выбранной области не найдено объектов. Измените область или параметры анализа.')
             }
             actions={changeArea}
           />
