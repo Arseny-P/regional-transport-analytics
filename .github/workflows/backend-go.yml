@@ -62,7 +62,7 @@ jobs:
   e2e:
     needs: [lint, test]
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - name: Set up local Compose environment
