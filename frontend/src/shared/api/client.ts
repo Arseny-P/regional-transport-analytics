@@ -45,10 +45,12 @@ export async function request<T>(
   const response = await fetch(buildUrl(path, params), {
     method,
     signal,
-    ...(body !== undefined && {
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }),
+    ...(body instanceof FormData
+      ? { body }
+      : body !== undefined && {
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        }),
   });
   if (!response.ok) throw await toApiError(response);
   return response.json() as Promise<T>;
