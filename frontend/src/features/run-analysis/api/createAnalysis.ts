@@ -25,7 +25,8 @@ export interface AnalysisReceipt {
 
 export function createAnalysis(
   jobId: string,
-  body: CreateAnalysisRequest
+  body: CreateAnalysisRequest,
+  signal: AbortSignal
 ): Promise<AnalysisReceipt> {
-  return request('/analysis', { method: 'POST', params: { job_id: jobId }, body });
+  return request('/analysis', { method: 'POST', params: { job_id: jobId }, body, signal });
 }
