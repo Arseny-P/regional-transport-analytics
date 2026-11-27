@@ -1,3 +1,4 @@
+import { analysisRequestErrorMessage } from '@/entities/analysis';
 import { useState } from 'react';
 import { AppSidebar } from '@/widgets/app-layout';
 import styles from './StartPage.module.css';
@@ -61,7 +62,7 @@ export function StartPage() {
         </select>
       </label>
 
-      {error && <p className={styles.error}>{error.message}</p>}
+      {error && <p className={styles.error}>{analysisRequestErrorMessage(error)}</p>}
 
       <Button
         disabled={!region}
