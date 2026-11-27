@@ -75,3 +75,69 @@ def find_fixture_files(
             break
 
     return road_path, fac_path
+
+
+def find_rail_fixture_files(
+    alias: str,
+    custom_dir: Optional[str] = None,
+    allow_default: Optional[bool] = None,
+) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Ищет локальные фикстуры железнодорожных путей (.json) и объектов инфраструктуры (.json)
+    по переданному алиасу/ключу BBox.
+
+    Возвращает кортеж (rail_ways_path, rail_objects_path).
+    """
+    if allow_default is None:
+        allow_default = os.getenv("OSM_OFFLINE_ALLOW_DEFAULT", "false").lower() in ("true", "1", "yes")
+
+    search_dirs = []
+    if custom_dir and os.path.exists(custom_dir):
+        search_dirs.append(custom_dir)
+    search_dirs.append(FIXTURES_DIR)
+
+    data_dir = os.getenv("DATA_DIR")
+    if data_dir and os.path.exists(data_dir) and data_dir not in search_dirs:
+        search_dirs.append(data_dir)
+
+    alias_lower = alias.lower()
+    ways_candidates = [
+        f"{alias}_rail_ways.json",
+        f"{alias}_ways.json",
+        f"{alias}.json",
+    ]
+    objects_candidates = [
+        f"{alias}_rail_objects.json",
+        f"{alias}_objects.json",
+    ]
+
+    if "shushary" in alias_lower or "шушары" in alias_lower:
+        ways_candidates.extend(["shushary_rail_ways.json", "bbox_59.7950_30.3850_59.8240_30.4410_rail_ways.json"])
+        objects_candidates.extend(["shushary_rail_objects.json", "bbox_59.7950_30.3850_59.8240_30.4410_rail_objects.json"])
+
+    if allow_default or alias_lower in ("default", "test", "demo", "sample"):
+        ways_candidates.append("shushary_rail_ways.json")
+        objects_candidates.append("shushary_rail_objects.json")
+
+    ways_path: Optional[str] = None
+    objs_path: Optional[str] = None
+
+    for d in search_dirs:
+        if not ways_path:
+            for wc in ways_candidates:
+                candidate_path = os.path.join(d, wc)
+                if os.path.exists(candidate_path):
+                    ways_path = candidate_path
+                    break
+
+        if not objs_path:
+            for oc in objects_candidates:
+                candidate_path = os.path.join(d, oc)
+                if os.path.exists(candidate_path):
+                    objs_path = candidate_path
+                    break
+
+        if ways_path and objs_path:
+            break
+
+    return ways_path, objs_path
