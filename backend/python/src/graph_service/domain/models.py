@@ -11,6 +11,29 @@ class TransportMode(str, Enum):
     SEA = "sea"
 
 
+class RailObjectType(str, Enum):
+    RAIL_FACILITY = "rail_facility"
+    RAIL_NODE = "rail_node"
+
+
+class RailNodeKind(str, Enum):
+    STATION = "station"
+    TERMINAL = "terminal"
+    SWITCH = "switch"
+    JUNCTION = "junction"
+    ENDPOINT = "endpoint"
+    BUFFER_STOP = "buffer_stop"
+    BOUNDARY = "boundary"
+    CROSSING = "crossing"
+    INTERMEDIATE = "intermediate"
+
+
+class RailConnectionStatus(str, Enum):
+    CONNECTED = "connected"
+    NOT_CHECKED = "not_checked"
+    NOT_CONNECTED = "not_connected"
+
+
 class RouteStatus(str, Enum):
     FOUND = "found"
     NOT_FOUND_IN_DATA = "not_found_in_data"
@@ -316,6 +339,7 @@ class AnalysisRequest:
     max_snap_distance_m: Optional[float] = 250.0
 
     knn: Optional[int] = None
+    transport_mode: str = TransportMode.ROAD.value
     output_dir: str = "data"
     output_alias: Optional[str] = None
     save_artifacts: bool = True
@@ -352,6 +376,7 @@ class AnalysisRequest:
             osm_tags=data.get("osm_tags"),
             max_snap_distance_m=float(data["max_snap_distance_m"]) if data.get("max_snap_distance_m") is not None else 250.0,
             knn=int(data["knn"]) if data.get("knn") is not None else None,
+            transport_mode=str(data.get("transport_mode", data.get("transport", TransportMode.ROAD.value))),
             output_dir=str(data.get("output_dir", "data")),
             output_alias=data.get("output_alias"),
             save_artifacts=bool(data.get("save_artifacts", True)),

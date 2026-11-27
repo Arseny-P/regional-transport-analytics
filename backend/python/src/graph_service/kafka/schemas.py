@@ -31,7 +31,7 @@ class ErrorCode(str, Enum):
     INTERNAL_ERROR = "internal_error"
 
 
-SUPPORTED_TRANSPORTS = {"road"}
+SUPPORTED_TRANSPORTS = {"road", "rail"}
 
 
 @dataclass
@@ -117,13 +117,18 @@ class StartCommandPayload:
     def validate_transports(self) -> None:
         """
         Проверяет, поддерживаются ли все указанные виды транспорта.
-        В Sprint 3 поддерживается исключительно 'road'.
+        Поддерживаются 'road' и 'rail'.
         """
         unsupported = set(self.transports) - SUPPORTED_TRANSPORTS
         if unsupported:
             raise ValueError(
                 f"Неподдерживаемые виды транспорта: {sorted(list(unsupported))}. "
                 f"Поддерживается только: {sorted(list(SUPPORTED_TRANSPORTS))}"
+            )
+        if len(self.transports) > 1:
+            raise ValueError(
+                "Одновременный анализ нескольких видов транспорта не поддерживается. "
+                "Пожалуйста, укажите ровно один вид транспорта: 'road' или 'rail'."
             )
 
     def to_dict(self) -> Dict[str, Any]:
