@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
+import { analysisRequestErrorMessage } from '@/entities/analysis';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
 import { Button, Message, Spinner } from '@/shared/ui';
@@ -25,7 +26,9 @@ export function AnalysisPage() {
   const [point2, setPoint2] = useState('');
   const [transports, setTransports] = useState<TransportMode[]>(DEFAULT_TRANSPORT_MODES);
   const { run, isLoading, error } = useRunAnalysis((jobId) =>
-    navigate(`/result?job_id=${encodeURIComponent(jobId)}`)
+    navigate(
+      `/result?job_id=${encodeURIComponent(jobId)}&region_id=${encodeURIComponent(regionId ?? '')}`
+    )
   );
 
   const toggleTransport = (mode: TransportMode) =>
@@ -144,7 +147,11 @@ export function AnalysisPage() {
         <div className={styles.messageOverlay}>
           <Message
             title={regionId ? 'Не удалось загрузить регион' : 'Регион не выбран'}
-            description={regionError?.message ?? 'Выберите регион, чтобы задать область анализа.'}
+            description={
+              regionError
+                ? analysisRequestErrorMessage(regionError)
+                : 'Выберите регион, чтобы задать область анализа.'
+            }
             actions={<Button onClick={() => navigate('/start')}>К выбору региона</Button>}
           />
         </div>

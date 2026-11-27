@@ -1,16 +1,26 @@
-import { useState, type ReactNode } from 'react';
-import { Popup } from 'react-leaflet';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
+import { useRegions } from '@/entities/region';
 import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
+  analysisErrorMessage,
+  analysisRequestErrorMessage,
+  isRetryableAnalysisRequest,
+  GraphLegend,
+  getNodeMetricRows,
+  NodeCardOverlay,
   selectMetrics,
   isFinalState,
   METRIC_LABELS,
+  REGION_METRIC_NAMES,
+  NODE_METRIC_NAMES,
+  formatMetricValue,
   useAnalysisJob,
   type JobState,
+  type NodeSelection,
   NodeCard,
 } from '@/entities/analysis';
 import { ApiError } from '@/shared/api';
@@ -35,7 +45,7 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
       <h3 className={styles.title}>Результаты анализа</h3>
       {sidebar}
 
-      <Button className={styles.newAnalysisButton} onClick={() => navigate('/analysis')}>
+      <Button className={styles.newAnalysisButton} onClick={() => navigate('/start')}>
         Новый анализ
       </Button>
     </>
@@ -52,23 +62,42 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
   const { status, result, requestError } = useAnalysisJob(jobId);
+  const [searchParams] = useSearchParams();
+  const { regions } = useRegions();
+  const regionId =
+    searchParams.get('region_id') ?? (regions?.length === 1 ? regions[0].region_id : null);
+  const returnToArea = () =>
+    navigate(regionId ? `/analysis?region_id=${encodeURIComponent(regionId)}` : '/start');
   const [metric, setMetric] = useState('');
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selection, setSelection] = useState<NodeSelection | null>(null);
 
   const job = status ?? result;
+  const failureMessage =
+    job?.error && job.error.code !== 'analysis_canceled' ? analysisErrorMessage(job.error) : null;
   const graph = result?.graph;
-  const selectedNode = graph?.nodes.find((node) => node.id === selectedNodeId);
+  const selectedNode =
+    selection &&
+    graph?.nodes.find(
+      (node) => node.id === selection.id && node.attributes?.object_type === selection.type
+    );
+  if (selection && !selectedNode) setSelection(null);
+
   const { globalMetrics, metricsByNodeId } = selectMetrics(result?.metrics ?? []);
-  const popupPosition: [number, number] | null = selectedNode
-    ? [selectedNode.position[1], selectedNode.position[0]]
-    : null;
-  const notFound = requestError instanceof ApiError && requestError.status === 404;
-  const isFinal = !!job && isFinalState(job.status);
-  const isWaiting = !notFound && !graph && (!isFinal || !result);
-  const hasGraph = !!graph?.nodes.length;
-  const changeArea = (
-    <Button onClick={() => navigate('/analysis')}>Изменить область или параметры</Button>
+  const globalValues = new Map(globalMetrics.map(({ name, value }) => [name, value]));
+  const hasRegionalMetrics = REGION_METRIC_NAMES.some((name) => globalValues.has(name));
+  const [longitude, latitude] = selectedNode?.position ?? [];
+  const popupPosition = useMemo<[number, number] | null>(
+    () => (latitude === undefined || longitude === undefined ? null : [latitude, longitude]),
+    [latitude, longitude]
   );
+  const notFound = requestError instanceof ApiError && requestError.status === 404;
+  const requestFailed = !!requestError && !isRetryableAnalysisRequest(requestError);
+  const isFinal = !!job && isFinalState(job.status);
+  const isWaiting = !requestFailed && !graph && (!isFinal || !result);
+  const hasGraph = !!graph?.nodes.length;
+  const changeArea = <Button onClick={() => navigate('/start')}>Начать новый анализ</Button>;
+  const cancelControl =
+    job && !isFinal ? <Button onClick={returnToArea}>Отменить анализ</Button> : null;
   const waitingTitle = requestError
     ? 'Восстанавливаем соединение'
     : job?.status === 'queued'
@@ -83,50 +112,64 @@ function JobResult({ jobId }: { jobId: string }) {
     <p className={styles.error}>Задача не найдена. Запустите новый анализ.</p>
   ) : (
     <>
-      <p className={styles.status} data-status={job?.status} role="status">
-        Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}
+      <p
+        className={styles.status}
+        data-status={requestFailed ? 'failed' : job?.status}
+        role="status"
+      >
+        Статус: {requestFailed ? 'Ошибка' : job ? STATUS_LABELS[job.status] : 'подключение...'}
       </p>
-      {job?.error && <p className={styles.error}>{job.error.message}</p>}
-      {requestError && <p className={styles.warning}>Нет связи с сервером, повторяем запрос...</p>}
+      {failureMessage && <p className={styles.error}>{failureMessage}</p>}
+      {requestError && (
+        <p className={styles.warning} role="alert">
+          {analysisRequestErrorMessage(requestError)}
+        </p>
+      )}
+      {job?.status === 'cancel_requested' && (
+        <p role="status">Отмена запрошена. Ожидаем подтверждения сервера.</p>
+      )}
+      {!isWaiting && cancelControl}
+      {job?.status === 'canceled' && hasGraph && (
+        <p role="status">Анализ отменён. Доступен ранее построенный граф.</p>
+      )}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
 
       <MetricSelect
+        names={NODE_METRIC_NAMES}
         metrics={[
           ...new Map(
-            (result?.metrics ?? []).filter((m) => m.node_id !== undefined).map((m) => [m.name, m])
+            (result?.metrics ?? [])
+              .filter(
+                (m) => m.node_id !== undefined && NODE_METRIC_NAMES.some((name) => name === m.name)
+              )
+              .map((m) => [m.name, m])
           ).values(),
         ]}
         value={metric}
         onChange={setMetric}
       />
-      <h4>Простые метрики графа:</h4>
-      {globalMetrics.length ? (
-        <>
-          <table className={styles.metricsTable}>
-            <thead>
-              <tr>
-                <th scope="col">Показатель</th>
-                <th scope="col">Значение</th>
-              </tr>
-            </thead>
-            <tbody>
-              {' '}
-              {globalMetrics.map(({ name, value }) => (
-                <tr key={name}>
-                  <th scope="row">{METRIC_LABELS[name] ?? name}</th>
-                  <td>{value ?? 'Не рассчитано'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      ) : (
+      <h4>Показатели региона</h4>
+      <table className={styles.metricsTable}>
+        <thead>
+          <tr>
+            <th scope="col">Показатель</th>
+            <th scope="col">Значение</th>
+          </tr>
+        </thead>
+        <tbody>
+          {REGION_METRIC_NAMES.map((name) => (
+            <tr key={name}>
+              <th scope="row">{METRIC_LABELS[name] ?? name}</th>
+              <td>{formatMetricValue(name, globalValues.get(name))}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!hasRegionalMetrics && !isFinal && !requestFailed && (
         <p className={styles.muted}>
-          {isFinal
-            ? 'Метрики не рассчитаны.'
-            : hasGraph
-              ? 'Метрики рассчитываются...'
-              : 'Метрики будут доступны после построения графа.'}
+          {hasGraph
+            ? 'Ожидаем значения метрик.'
+            : 'Значения появятся после построения графа и расчёта метрик.'}
         </p>
       )}
     </>
@@ -134,23 +177,23 @@ function JobResult({ jobId }: { jobId: string }) {
 
   return (
     <ResultLayout sidebar={sidebar}>
-      <MapView>
+      <MapView
+        showRegions={false}
+        legend={
+          <GraphLegend colorBy={metric || undefined} graph={graph} metrics={result?.metrics} />
+        }
+      >
         {graph && (
           <GraphLayer
             metrics={result?.metrics ?? []}
             graph={graph}
             colorBy={metric || undefined}
-            onNodeHover={setSelectedNodeId}
+            selection={selection}
+            onNodeSelect={setSelection}
           />
         )}
         {selectedNode && popupPosition && (
-          <Popup
-            position={popupPosition}
-            offset={[0, -8]}
-            autoPan={false}
-            closeButton={false}
-            closeOnClick={false}
-          >
+          <NodeCardOverlay position={popupPosition}>
             <NodeCard
               node={{
                 id: selectedNode.id,
@@ -160,14 +203,10 @@ function JobResult({ jobId }: { jobId: string }) {
                   ? (selectedNode.attributes.isolation_reason ?? 'Изолирован')
                   : undefined,
               }}
-              metrics={(metricsByNodeId.get(selectedNode.id) ?? []).map(({ name, value }) => ({
-                id: name,
-                label: METRIC_LABELS[name] ?? name,
-                value,
-              }))}
-              onClose={() => setSelectedNodeId(null)}
+              metrics={getNodeMetricRows(selectedNode, metricsByNodeId.get(selectedNode.id) ?? [])}
+              onClose={() => setSelection(null)}
             />
-          </Popup>
+          </NodeCardOverlay>
         )}
       </MapView>
       {isWaiting && (
@@ -176,23 +215,26 @@ function JobResult({ jobId }: { jobId: string }) {
             title={waitingTitle}
             description={
               requestError
-                ? 'Нет связи с сервером. Повторяем запрос автоматически.'
-                : 'Ожидаем готовности графа выбранной территории.'
+                ? `${analysisRequestErrorMessage(requestError)} Повторяем запрос автоматически.`
+                : job?.status === 'cancel_requested'
+                  ? 'Запрос на отмену отправлен. Дождитесь подтверждения сервера.'
+                  : 'Ожидаем готовности графа выбранной территории.'
             }
             icon={<Spinner size="large" text="" />}
+            actions={cancelControl}
           />
         </div>
       )}
-      {notFound && (
+      {requestFailed && (
         <div className={styles.overlay}>
           <Message
-            title="Задача не найдена"
-            description="Запустите новый анализ выбранной области."
+            title={notFound ? 'Анализ не найден' : 'Не удалось получить результат'}
+            description={analysisRequestErrorMessage(requestError)}
             actions={changeArea}
           />
         </div>
       )}
-      {!notFound && isFinal && !!result && !hasGraph && (
+      {!requestFailed && isFinal && !!result && !hasGraph && (
         <div className={styles.overlay}>
           <Message
             title={
@@ -203,10 +245,12 @@ function JobResult({ jobId }: { jobId: string }) {
                   : 'Данные не найдены'
             }
             description={
-              job?.error?.message ??
-              (job?.status === 'canceled'
-                ? 'Можно изменить параметры и запустить анализ снова.'
-                : 'В выбранной области не найдено объектов. Измените область или параметры анализа.')
+              failureMessage ??
+              (job?.status === 'failed'
+                ? 'Не удалось завершить анализ. Попробуйте запустить его снова.'
+                : job?.status === 'canceled'
+                  ? 'Можно изменить параметры и запустить анализ снова.'
+                  : 'В выбранной области не найдено объектов. Измените область или параметры анализа.')
             }
             actions={changeArea}
           />
@@ -225,7 +269,7 @@ export function ResultPage() {
       <ResultLayout
         sidebar={<p className={styles.error}>Нет данных анализа. Запустите новый анализ.</p>}
       >
-        <MapView />
+        <MapView showRegions={false} legend={<GraphLegend />} />
         <div className={styles.overlay}>
           <Message
             title="Нет данных анализа"

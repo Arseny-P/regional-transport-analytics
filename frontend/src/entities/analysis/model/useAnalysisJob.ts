@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ApiError } from '@/shared/api';
+import { isRetryableAnalysisRequest } from '../lib/analysisErrorMessage';
 import { getAnalysisResult, sendHeartbeat } from '../api/analysisApi';
 import { isFinalState, type AnalysisResult, type AnalysisStatus } from './types';
 
@@ -22,7 +22,7 @@ export function useAnalysisJob(jobId: string) {
     const fail = (err: unknown) => {
       if (stopped) return;
       setRequestError(err as Error);
-      if (err instanceof ApiError && err.status === 404) {
+      if (!isRetryableAnalysisRequest(err)) {
         stopped = true;
         window.clearInterval(timer);
         window.clearTimeout(retry);

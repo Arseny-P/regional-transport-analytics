@@ -32,3 +32,8 @@ jobs:
         run: npm ci
       - name: Check formatting, lint and types
         run: npm run check
+      - name: Build frontend
+        env:
+          VITE_API_URL: /api
+          VITE_API_MOCKS: "false"
+        run: npm run build

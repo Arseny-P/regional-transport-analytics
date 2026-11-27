@@ -6,3 +6,4 @@ PM-research/
 !.env.example
 **/bin/
 **/coverage.out
+.vscode

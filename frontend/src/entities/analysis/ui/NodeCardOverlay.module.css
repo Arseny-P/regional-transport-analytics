@@ -1,0 +1,33 @@
+/* Слой карточки ограничен областью карты. */
+.layer {
+  position: absolute;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.anchor {
+  position: absolute;
+  anchor-name: --selected-graph-node;
+}
+
+.anchor[hidden] + .card {
+  display: none;
+}
+
+/* Карточка и прокрутка для карты небольшой высоты. */
+.card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  padding: 12px;
+  width: max-content;
+  max-width: min(320px, calc(100% - 16px));
+  max-height: calc(100% - 16px);
+  overflow: auto;
+  overflow-wrap: anywhere;
+  border-radius: 12px;
+  background-color: var(--general-bg);
+  box-shadow: 0 4px 16px rgb(0 0 0 / 22%);
+  pointer-events: auto;
+}

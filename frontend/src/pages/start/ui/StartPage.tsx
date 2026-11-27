@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { analysisRequestErrorMessage } from '@/entities/analysis';
 import { AppSidebar } from '@/widgets/app-layout';
 import styles from './StartPage.module.css';
 import { MapView } from '@/widgets/map-view';
@@ -125,7 +126,7 @@ export function StartPage() {
         </select>
       </label>
 
-      {error && <p className={styles.error}>{error.message}</p>}
+      {error && <p className={styles.error}>{analysisRequestErrorMessage(error)}</p>}
 
       <Button
         disabled={!region || isUploading}

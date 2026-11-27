@@ -1,3 +1,4 @@
+import { formatMetricValue } from '../config/metricLabels';
 import styles from './NodeCard.module.css';
 
 type NodeKind = 'warehouse' | 'intersection' | 'road_node';
@@ -60,11 +61,7 @@ export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
             {metrics.map(({ id, label, value, unit }) => (
               <tr key={id}>
                 <th scope="row">{label}</th>
-                <td>
-                  {value == null
-                    ? 'Не рассчитано'
-                    : `${value.toLocaleString('ru-RU')}${unit ? ` ${unit}` : ''}`}
-                </td>
+                <td>{formatMetricValue(id, value, unit)}</td>
               </tr>
             ))}
           </tbody>
