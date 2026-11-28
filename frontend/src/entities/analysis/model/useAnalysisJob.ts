@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { ApiError } from '@/shared/api';
 import { isRetryableAnalysisRequest } from '../lib/analysisErrorMessage';
-import { getAnalysisResult, sendHeartbeat } from '../api/analysisApi';
-import { isFinalState, type AnalysisResult, type AnalysisStatus } from './types';
+import { cancelAnalysis, getAnalysisResult, sendHeartbeat } from '../api/analysisApi';
+import { isFinalState, type AnalysisResult, type AnalysisStatus, type JobState } from './types';
 
 const HEARTBEAT_INTERVAL_MS = 5000;
 const RESULT_RETRY_DELAY_MS = 5000;
@@ -11,6 +12,15 @@ const MAX_RESULT_ATTEMPTS = 3;
 interface RequestFailure {
   error: unknown;
   retrying: boolean;
+}
+
+type Cancellation =
+  { type: 'idle' | 'sending' } | { type: 'failed' | 'already_finished'; error: unknown };
+
+const IDLE_CANCELLATION: Cancellation = { type: 'idle' };
+
+function canCancelStatus(status: JobState | undefined): boolean {
+  return status === 'queued' || status === 'running';
 }
 
 function resultKey({ status, graph_available, metrics_available }: AnalysisStatus): string {
@@ -23,11 +33,16 @@ export function useAnalysisJob(jobId: string) {
   const [heartbeatFailure, setHeartbeatFailure] = useState<RequestFailure | null>(null);
   const [resultFailure, setResultFailure] = useState<RequestFailure | null>(null);
   const [isLoadingResult, setIsLoadingResult] = useState(false);
+  const [cancellation, setCancellation] = useState<Cancellation>(IDLE_CANCELLATION);
   const retryResultRef = useRef<(() => void) | null>(null);
+  const cancelRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const heartbeatController = new AbortController();
-    const resultController = new AbortController();
+    const jobController = new AbortController();
+    let currentStatus: JobState | undefined;
+    let cancelInFlight = false;
+    let finishedBeforeCancel = false;
     let sentHeartbeats = 0;
     let lastHandledHeartbeat = 0;
     let heartbeatFailures = 0;
@@ -47,8 +62,25 @@ export function useAnalysisJob(jobId: string) {
       resultRetryTimer = undefined;
     }
 
+    function acceptStatus(data: AnalysisStatus) {
+      const final = isFinalState(data.status);
+      if (
+        (currentStatus && isFinalState(currentStatus) && currentStatus !== data.status) ||
+        (currentStatus === 'cancel_requested' && canCancelStatus(data.status)) ||
+        (finishedBeforeCancel && !final)
+      ) {
+        return false;
+      }
+
+      currentStatus = data.status;
+      setStatus(data);
+      if (data.status === 'cancel_requested' || final) setCancellation(IDLE_CANCELLATION);
+      if (final) stopHeartbeat();
+      return true;
+    }
+
     async function loadResult() {
-      if (resultController.signal.aborted || resultInFlight || wantedResult === fetchedResult) {
+      if (jobController.signal.aborted || resultInFlight || wantedResult === fetchedResult) {
         return;
       }
 
@@ -57,15 +89,13 @@ export function useAnalysisJob(jobId: string) {
       resultAttempts++;
 
       try {
-        const data = await getAnalysisResult(jobId, resultController.signal);
-        if (resultController.signal.aborted) return;
+        const data = await getAnalysisResult(jobId, jobController.signal);
+        if (jobController.signal.aborted) return;
 
         setResult(data);
         const receivedResult = resultKey(data);
-        if (isFinalState(data.status)) {
-          stopHeartbeat();
+        if (isFinalState(data.status) && acceptStatus(data)) {
           setHeartbeatFailure(null);
-          setStatus(data);
           wantedResult = receivedResult;
         }
         fetchedResult = receivedResult === wantedResult ? receivedResult : requestedResult;
@@ -74,7 +104,7 @@ export function useAnalysisJob(jobId: string) {
           setIsLoadingResult(false);
         }
       } catch (error) {
-        if (resultController.signal.aborted || requestedResult !== wantedResult) return;
+        if (jobController.signal.aborted || requestedResult !== wantedResult) return;
 
         const retrying = isRetryableAnalysisRequest(error) && resultAttempts < MAX_RESULT_ATTEMPTS;
         setResultFailure({ error, retrying });
@@ -103,21 +133,28 @@ export function useAnalysisJob(jobId: string) {
       void loadResult();
     }
 
+    function receiveStatus(data: AnalysisStatus) {
+      if (
+        acceptStatus(data) &&
+        (data.graph_available || data.metrics_available || isFinalState(data.status))
+      ) {
+        requestResult(data);
+      }
+    }
+
     async function beat() {
+      if (heartbeatController.signal.aborted) return;
       const sequence = ++sentHeartbeats;
       try {
         const data = await sendHeartbeat(jobId, heartbeatController.signal);
-        if (heartbeatController.signal.aborted || sequence < lastHandledHeartbeat) return;
+        if (heartbeatController.signal.aborted || sequence <= lastHandledHeartbeat) return;
 
         lastHandledHeartbeat = sequence;
         heartbeatFailures = 0;
         setHeartbeatFailure(null);
-        setStatus(data);
-        const final = isFinalState(data.status);
-        if (final) stopHeartbeat();
-        if (data.graph_available || data.metrics_available || final) requestResult(data);
+        receiveStatus(data);
       } catch (error) {
-        if (heartbeatController.signal.aborted || sequence < lastHandledHeartbeat) return;
+        if (heartbeatController.signal.aborted || sequence <= lastHandledHeartbeat) return;
 
         lastHandledHeartbeat = sequence;
         heartbeatFailures++;
@@ -130,6 +167,40 @@ export function useAnalysisJob(jobId: string) {
       }
     }
 
+    async function cancel() {
+      if (!canCancelStatus(currentStatus) || cancelInFlight || finishedBeforeCancel) return;
+
+      cancelInFlight = true;
+      setCancellation({ type: 'sending' });
+      try {
+        const data = await cancelAnalysis(jobId, jobController.signal);
+        if (jobController.signal.aborted) return;
+
+        lastHandledHeartbeat = sentHeartbeats;
+        setHeartbeatFailure(null);
+        heartbeatFailures = 0;
+        receiveStatus(data);
+      } catch (error) {
+        if (jobController.signal.aborted || !canCancelStatus(currentStatus)) return;
+
+        if (
+          error instanceof ApiError &&
+          error.status === 409 &&
+          error.code === 'job_already_finished'
+        ) {
+          finishedBeforeCancel = true;
+          lastHandledHeartbeat = sentHeartbeats;
+          setCancellation({ type: 'already_finished', error });
+          void beat();
+        } else {
+          setCancellation({ type: 'failed', error });
+        }
+      } finally {
+        cancelInFlight = false;
+      }
+    }
+
+    cancelRef.current = () => void cancel();
     retryResultRef.current = () => {
       if (
         resultInFlight ||
@@ -149,8 +220,9 @@ export function useAnalysisJob(jobId: string) {
     void beat();
     return () => {
       stopHeartbeat();
-      resultController.abort();
+      jobController.abort();
       clearResultRetry();
+      cancelRef.current = null;
       retryResultRef.current = null;
     };
   }, [jobId]);
@@ -161,6 +233,8 @@ export function useAnalysisJob(jobId: string) {
     heartbeatFailure,
     resultFailure,
     isLoadingResult,
+    cancellation,
+    cancel: () => cancelRef.current?.(),
     retryResult: () => retryResultRef.current?.(),
   };
 }

@@ -23,6 +23,7 @@ interface MockJob {
   createdAt: number;
   lastSeenAt: number;
   canceled: boolean;
+  cancellationRequestedAt?: number;
   graph: Graph;
 }
 
@@ -62,6 +63,7 @@ const QUEUE_MS = 1000;
 const GRAPH_MS = 3000;
 const METRICS_MS = 25000;
 const HEARTBEAT_TIMEOUT_MS = 10000;
+const CANCEL_CONFIRMATION_MS = 5000;
 const NODES_COUNT = 15;
 
 const loadJobs = (): Record<string, MockJob> =>
@@ -120,7 +122,7 @@ function metricsOf(graph: Graph): Metric[] {
   ];
 }
 
-function statusOf(jobId: string, job: MockJob): AnalysisStatus {
+function statusOf(jobId: string, job: MockJob, now = Date.now()): AnalysisStatus {
   if (job.scenario === 'graph-failed') {
     return {
       job_id: jobId,
@@ -134,12 +136,27 @@ function statusOf(jobId: string, job: MockJob): AnalysisStatus {
     };
   }
 
-  const elapsed = Date.now() - job.createdAt;
+  const elapsed = now - job.createdAt;
+  if (job.cancellationRequestedAt !== undefined) {
+    return {
+      job_id: jobId,
+      graph_available: job.cancellationRequestedAt - job.createdAt >= GRAPH_MS,
+      metrics_available: false,
+      status:
+        now - job.cancellationRequestedAt >= CANCEL_CONFIRMATION_MS
+          ? 'canceled'
+          : 'cancel_requested',
+    };
+  }
+
   const graphReady = elapsed >= GRAPH_MS;
   const base = { job_id: jobId, graph_available: graphReady, metrics_available: false };
 
   if (job.scenario === 'canceled' && elapsed >= METRICS_MS)
-    return { ...base, status: elapsed < METRICS_MS + 5000 ? 'cancel_requested' : 'canceled' };
+    return {
+      ...base,
+      status: elapsed < METRICS_MS + CANCEL_CONFIRMATION_MS ? 'cancel_requested' : 'canceled',
+    };
   if (job.canceled) return { ...base, status: 'canceled' };
   if (elapsed < METRICS_MS) return { ...base, status: elapsed < QUEUE_MS ? 'queued' : 'running' };
   if (job.scenario === 'failed') {
@@ -217,6 +234,24 @@ export const handlers = [
     const snapshot = statusOf(jobId, job);
     if (job.scenario === 'slow-heartbeat') await delay(12000);
     return HttpResponse.json(snapshot);
+  }),
+
+  http.post(`${API_URL}/analysis/cancel`, ({ request }) => {
+    const { jobId, job, jobs } = findJob(request);
+    if (!jobId) return error(400, 'missing_job_id', 'Не передан job_id.');
+    if (!job) return error(404, 'job_not_found', 'Задача не найдена.');
+
+    const now = Date.now();
+    const snapshot = statusOf(jobId, job, now);
+    if (snapshot.status === 'completed' || snapshot.status === 'failed') {
+      return error(409, 'job_already_finished', 'Задача уже завершена.');
+    }
+    if (snapshot.status === 'canceled') return HttpResponse.json(snapshot);
+    if (snapshot.status === 'cancel_requested') return HttpResponse.json(snapshot, { status: 202 });
+
+    job.cancellationRequestedAt = now;
+    saveJobs(jobs);
+    return HttpResponse.json(statusOf(jobId, job, now), { status: 202 });
   }),
 
   http.get(`${API_URL}/analysis/result`, async ({ request }) => {

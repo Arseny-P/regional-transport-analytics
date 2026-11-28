@@ -2,7 +2,6 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
-import { useRegions } from '@/entities/region';
 import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
@@ -61,14 +60,16 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
-  const { status, result, heartbeatFailure, resultFailure, isLoadingResult, retryResult } =
-    useAnalysisJob(jobId);
-  const [searchParams] = useSearchParams();
-  const { regions } = useRegions();
-  const regionId =
-    searchParams.get('region_id') ?? (regions?.length === 1 ? regions[0].region_id : null);
-  const returnToArea = () =>
-    navigate(regionId ? `/analysis?region_id=${encodeURIComponent(regionId)}` : '/start');
+  const {
+    status,
+    result,
+    heartbeatFailure,
+    resultFailure,
+    isLoadingResult,
+    cancellation,
+    cancel,
+    retryResult,
+  } = useAnalysisJob(jobId);
   const [metric, setMetric] = useState('');
   const [selection, setSelection] = useState<NodeSelection | null>(null);
 
@@ -97,16 +98,23 @@ function JobResult({ jobId }: { jobId: string }) {
   const requestFailed = heartbeatUnavailable || resultUnavailable;
   const notFound = requestFailure?.error instanceof ApiError && requestFailure.error.status === 404;
   const isFinal = !!job && isFinalState(job.status);
-  const isWaiting = !requestFailed && !graph && (!isFinal || isLoadingResult);
+  const canceled = job?.status === 'canceled';
+  const isWaiting = !canceled && !requestFailed && !graph && (!isFinal || isLoadingResult);
   const hasGraph = !!graph?.nodes.length;
-  const showRequestFailure = requestFailed && !graph;
+  const showRequestFailure = !canceled && requestFailed && !graph;
   const changeArea = <Button onClick={() => navigate('/start')}>Начать новый анализ</Button>;
   const retryResultControl = resultUnavailable &&
     isRetryableAnalysisRequest(resultFailure.error) && (
       <Button onClick={retryResult}>Повторить загрузку результата</Button>
     );
-  const cancelControl =
-    job && !isFinal ? <Button onClick={returnToArea}>Отменить анализ</Button> : null;
+  const cancelControl = job && !isFinal && cancellation.type !== 'already_finished' && (
+    <Button
+      disabled={cancellation.type === 'sending' || job.status === 'cancel_requested'}
+      onClick={cancel}
+    >
+      {cancellation.type === 'sending' ? 'Отправляем запрос на отмену…' : 'Отменить анализ'}
+    </Button>
+  );
   const waitingFailure = resultFailure ?? heartbeatFailure;
   const waitingTitle = resultFailure
     ? 'Повторяем загрузку результата'
@@ -135,7 +143,7 @@ function JobResult({ jobId }: { jobId: string }) {
           Не удалось обновить статус. {analysisRequestErrorMessage(heartbeatFailure.error)}
         </p>
       )}
-      {graph && resultFailure && (
+      {(graph || canceled) && resultFailure && (
         <>
           <p className={styles.warning} role="alert">
             Не удалось загрузить результат. {analysisRequestErrorMessage(resultFailure.error)}
@@ -143,11 +151,19 @@ function JobResult({ jobId }: { jobId: string }) {
           {retryResultControl}
         </>
       )}
+      {cancellation.type === 'failed' && (
+        <p className={styles.warning} role="alert">
+          Не удалось отменить анализ. {analysisRequestErrorMessage(cancellation.error)}
+        </p>
+      )}
+      {cancellation.type === 'already_finished' && (
+        <p role="status">{analysisRequestErrorMessage(cancellation.error)}</p>
+      )}
       {job?.status === 'cancel_requested' && (
         <p role="status">Отмена запрошена. Ожидаем подтверждения сервера.</p>
       )}
       {!isWaiting && !showRequestFailure && cancelControl}
-      {job?.status === 'canceled' && hasGraph && (
+      {canceled && hasGraph && (
         <p role="status">Анализ отменён. Доступен ранее построенный граф.</p>
       )}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
@@ -258,6 +274,7 @@ function JobResult({ jobId }: { jobId: string }) {
             description={analysisRequestErrorMessage(requestFailure.error)}
             actions={
               <>
+                {cancelControl}
                 {retryResultControl}
                 {changeArea}
               </>
@@ -265,7 +282,7 @@ function JobResult({ jobId }: { jobId: string }) {
           />
         </div>
       )}
-      {!requestFailed && !isLoadingResult && isFinal && !!result && !hasGraph && (
+      {!hasGraph && (canceled || (!requestFailed && !isLoadingResult && isFinal && !!result)) && (
         <div className={styles.overlay}>
           <Message
             title={
