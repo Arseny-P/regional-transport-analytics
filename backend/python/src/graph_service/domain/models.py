@@ -9,6 +9,8 @@ class TransportMode(str, Enum):
     ROAD = "road"
     RAIL = "rail"
     SEA = "sea"
+    ROAD_RAIL = "road,rail"
+    MULTIMODAL = "multimodal"
 
 
 class RailObjectType(str, Enum):

@@ -512,3 +512,81 @@ class GraphSerializer:
         except Exception:
             return None
 
+    @classmethod
+    def merge(cls, road_payload: GraphPayload, rail_payload: GraphPayload) -> GraphPayload:
+        """
+        Объединяет дорожный и железнодорожный графы в единый мультимодальный GraphPayload.
+        Гарантирует уникальность ID узлов и рёбер, сохраняет топологическую изоляцию сетей.
+        Каждая вершина и ребро получают атрибут transport ('road' или 'rail').
+        """
+        seen_nodes: Set[str] = set()
+        merged_nodes: List[NodePayload] = []
+
+        for node in road_payload.nodes:
+            if node.id not in seen_nodes:
+                seen_nodes.add(node.id)
+                attrs = dict(node.attributes or {})
+                if "transport" not in attrs:
+                    attrs["transport"] = "road"
+                merged_nodes.append(
+                    NodePayload(
+                        id=node.id,
+                        position=node.position,
+                        attributes=attrs,
+                    )
+                )
+
+        for node in rail_payload.nodes:
+            if node.id not in seen_nodes:
+                seen_nodes.add(node.id)
+                attrs = dict(node.attributes or {})
+                if "transport" not in attrs:
+                    attrs["transport"] = "rail"
+                merged_nodes.append(
+                    NodePayload(
+                        id=node.id,
+                        position=node.position,
+                        attributes=attrs,
+                    )
+                )
+
+        seen_edges: Set[str] = set()
+        merged_edges: List[EdgePayload] = []
+
+        for edge in road_payload.edges:
+            seen_edges.add(edge.id)
+            attrs = dict(edge.attributes or {})
+            if "transport" not in attrs:
+                attrs["transport"] = "road"
+            merged_edges.append(
+                EdgePayload(
+                    id=edge.id,
+                    source=edge.source,
+                    target=edge.target,
+                    segment_id=edge.segment_id,
+                    geometry=edge.geometry,
+                    attributes=attrs,
+                )
+            )
+
+        for edge in rail_payload.edges:
+            eid = edge.id
+            if eid in seen_edges:
+                eid = f"rail_{eid}"
+            seen_edges.add(eid)
+            attrs = dict(edge.attributes or {})
+            if "transport" not in attrs:
+                attrs["transport"] = "rail"
+            merged_edges.append(
+                EdgePayload(
+                    id=eid,
+                    source=edge.source,
+                    target=edge.target,
+                    segment_id=edge.segment_id,
+                    geometry=edge.geometry,
+                    attributes=attrs,
+                )
+            )
+
+        return GraphPayload(nodes=merged_nodes, edges=merged_edges)
+

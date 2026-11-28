@@ -1,0 +1,138 @@
+{
+  "message_id": "88888888-8888-4888-8888-888888888888",
+  "job_id": "550e8400-e29b-41d4-a716-446655440000",
+  "type": "RESULT",
+  "transport_type": "road,rail",
+  "payload": {
+    "status": "completed",
+    "graph": {
+      "nodes": [
+        {
+          "id": "wh_1",
+          "position": [
+            30.385,
+            59.805
+          ],
+          "attributes": {
+            "name": "Логистический комплекс Шушары",
+            "object_type": "facility",
+            "transport": "road"
+          }
+        },
+        {
+          "id": "road_node_101",
+          "position": [
+            30.386,
+            59.806
+          ],
+          "attributes": {
+            "object_type": "road_node",
+            "transport": "road"
+          }
+        },
+        {
+          "id": "station:1377619868",
+          "position": [
+            30.395,
+            59.815
+          ],
+          "attributes": {
+            "name": "Шушары",
+            "object_type": "rail_facility",
+            "node_kind": "station",
+            "transport": "rail",
+            "anchor_node_ids": [
+              "1377619868"
+            ]
+          }
+        },
+        {
+          "id": "switch_201",
+          "position": [
+            30.396,
+            59.816
+          ],
+          "attributes": {
+            "object_type": "rail_node",
+            "node_kind": "switch",
+            "transport": "rail",
+            "is_switch": true
+          }
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_road_1",
+          "source": "wh_1",
+          "target": "road_node_101",
+          "geometry": [
+            [
+              30.385,
+              59.805
+            ],
+            [
+              30.386,
+              59.806
+            ]
+          ],
+          "attributes": {
+            "edge_type": "access_connector",
+            "transport": "road",
+            "length_m": 120.5
+          }
+        },
+        {
+          "id": "e_rail_1",
+          "source": "switch_201",
+          "target": "station:1377619868",
+          "segment_id": "seg_rail_201",
+          "geometry": [
+            [
+              30.396,
+              59.816
+            ],
+            [
+              30.395,
+              59.815
+            ]
+          ],
+          "attributes": {
+            "transport": "rail",
+            "length_m": 150.0
+          }
+        }
+      ]
+    },
+    "metrics": [
+      {
+        "name": "warehouse_count",
+        "value": 1.0
+      },
+      {
+        "name": "road_segment_count",
+        "value": 1.0
+      },
+      {
+        "name": "total_length_km",
+        "value": 0.12
+      },
+      {
+        "name": "total_rail_length_km",
+        "value": 0.15
+      },
+      {
+        "name": "station_count",
+        "value": 1.0
+      },
+      {
+        "name": "switch_count",
+        "value": 1.0
+      },
+      {
+        "name": "nearest_station_distance_m",
+        "value": 150.0,
+        "node_id": "station:1377619868"
+      }
+    ]
+  }
+}

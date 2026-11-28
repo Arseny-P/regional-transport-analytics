@@ -54,6 +54,9 @@ class TerritoryAnalysisService:
         if request.transport_mode == TransportMode.RAIL.value:
             return self.run_rail_analysis(request, cancellation_token)
 
+        if request.transport_mode in (TransportMode.ROAD_RAIL.value, TransportMode.MULTIMODAL.value):
+            return self._run_multimodal_aggregated(request, cancellation_token)
+
         start_time = time.time()
         warnings: List[str] = []
         storage_dir = request.output_dir or self.default_storage_dir
@@ -630,6 +633,97 @@ class TerritoryAnalysisService:
             graph_object=routing_graph,
             facilities=facilities,
             physical_graph=G_simple,
+        )
+
+    def run_multimodal_analysis(
+        self,
+        request: AnalysisRequest,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> Dict[str, AnalysisResponse]:
+        """
+        Запускает анализ дорожной и железнодорожной сети.
+        Возвращает словарь с ответами: {'road': road_response, 'rail': rail_response}.
+        """
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
+        road_req = AnalysisRequest(
+            territory_type=request.territory_type,
+            bbox=request.bbox,
+            place_name=request.place_name,
+            facilities=request.facilities,
+            facility_source=request.facility_source,
+            osm_facilities_limit=request.osm_facilities_limit,
+            osm_tags=request.osm_tags,
+            max_snap_distance_m=request.max_snap_distance_m,
+            knn=request.knn,
+            transport_mode=TransportMode.ROAD.value,
+            output_dir=request.output_dir,
+            output_alias=f"{request.output_alias}_road" if request.output_alias else None,
+            save_artifacts=request.save_artifacts,
+            include_geojson_payload=request.include_geojson_payload,
+            refetch=request.refetch,
+        )
+        rail_req = AnalysisRequest(
+            territory_type=request.territory_type,
+            bbox=request.bbox,
+            place_name=request.place_name,
+            facilities=request.facilities,
+            facility_source=request.facility_source,
+            osm_facilities_limit=request.osm_facilities_limit,
+            osm_tags=request.osm_tags,
+            max_snap_distance_m=request.max_snap_distance_m,
+            knn=request.knn,
+            transport_mode=TransportMode.RAIL.value,
+            output_dir=request.output_dir,
+            output_alias=f"{request.output_alias}_rail" if request.output_alias else None,
+            save_artifacts=request.save_artifacts,
+            include_geojson_payload=request.include_geojson_payload,
+            refetch=request.refetch,
+        )
+
+        road_res = self.run_analysis(road_req, cancellation_token)
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+        rail_res = self.run_rail_analysis(rail_req, cancellation_token)
+
+        return {"road": road_res, "rail": rail_res}
+
+    def _run_multimodal_aggregated(
+        self,
+        request: AnalysisRequest,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> AnalysisResponse:
+        """
+        Запускает мультимодальный анализ и возвращает агрегированный AnalysisResponse.
+        """
+        responses = self.run_multimodal_analysis(request, cancellation_token)
+        road_resp = responses["road"]
+        rail_resp = responses["rail"]
+
+        if road_resp.status == AnalysisStatus.ERROR.value:
+            return road_resp
+        if rail_resp.status == AnalysisStatus.ERROR.value:
+            return rail_resp
+
+        merged_artifacts = dict(road_resp.artifacts)
+        merged_artifacts.update(rail_resp.artifacts)
+        merged_summary = {
+            "road": road_resp.summary,
+            "rail": rail_resp.summary,
+        }
+        return AnalysisResponse(
+            status=AnalysisStatus.SUCCESS.value,
+            territory=road_resp.territory,
+            summary=merged_summary,
+            artifacts=merged_artifacts,
+            hubs=road_resp.hubs + rail_resp.hubs,
+            connections=road_resp.connections + rail_resp.connections,
+            routes=road_resp.routes + rail_resp.routes,
+            warnings=road_resp.warnings + rail_resp.warnings,
+            graph_object=road_resp.graph_object,
+            facilities=rail_resp.facilities,
+            physical_graph=rail_resp.physical_graph,
         )
 
 
