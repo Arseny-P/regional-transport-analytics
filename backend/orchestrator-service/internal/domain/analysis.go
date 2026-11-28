@@ -26,10 +26,11 @@ type OutboxMessage struct {
 }
 
 type InboxMessage struct {
-	MessageID uuid.UUID
-	JobID     uuid.UUID
-	Type      string
-	Payload   AnalysisPayload
+	MessageID     uuid.UUID
+	JobID         uuid.UUID
+	TransportType Transport
+	Type          string
+	Payload       AnalysisPayload
 }
 
 type AnalysisPayload struct {
@@ -39,11 +40,17 @@ type AnalysisPayload struct {
 	Error   *ErrorResp
 }
 
-type AnalysisResult struct {
-	JobID            uuid.UUID
+type WorksRes struct {
 	Payload          AnalysisPayload
 	GraphAvailable   bool
+	TransportType    Transport
 	MetricsAvailable bool
+}
+
+type AnalysisResult struct {
+	JobID       uuid.UUID
+	Payload     AnalysisPayload
+	WorkResults []*WorksRes
 }
 
 type Graph struct {
@@ -82,8 +89,6 @@ type Heartbeat struct {
 	Status string
 }
 type HeartbeatResponse struct {
-	Status           JobStatus
-	GraphAvailable   bool
-	MetricsAvailable bool
-	Error            *ErrorResp
+	Status      JobStatus
+	WorkResults []*WorksRes
 }
