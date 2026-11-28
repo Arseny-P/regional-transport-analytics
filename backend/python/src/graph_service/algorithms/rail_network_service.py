@@ -358,7 +358,8 @@ class RailNetworkService:
 
             forward_node = d.get("geometry_from", u)
             backward_node = v if forward_node == u else u
-            coords = list(d["geometry"].coords)
+            geom = d.get("geometry")
+            coords = list(geom.coords) if geom is not None else []
 
             directions = ["forward", "backward"]
             if oneway_val in {"yes", "true", "1"}:
@@ -366,21 +367,25 @@ class RailNetworkService:
             elif oneway_val in {"-1"}:
                 directions = ["backward"]
 
+            edge_id = str(d.get("id", key))
+            segment_id = str(d.get("segment_id", key))
+            length_m = float(d.get("length_m", 0.0))
+
             for direction in directions:
                 if direction == "forward":
                     src, dst = forward_node, backward_node
-                    edge_geom = LineString(coords)
+                    edge_geom = LineString(coords) if len(coords) >= 2 else None
                 else:
                     src, dst = backward_node, forward_node
-                    edge_geom = LineString(coords[::-1])
+                    edge_geom = LineString(coords[::-1]) if len(coords) >= 2 else None
 
                 routed.add_edge(
                     src,
                     dst,
                     key=f"{key}:{direction}",
-                    id=f"{d['id']}:{direction}",
-                    segment_id=d["segment_id"],
-                    length_m=d["length_m"],
+                    id=f"{edge_id}:{direction}",
+                    segment_id=segment_id,
+                    length_m=length_m,
                     geometry=edge_geom,
                     source_osm_ids=d.get("source_osm_ids", []),
                     source_segment_ids=d.get("source_segment_ids", []),
