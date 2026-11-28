@@ -200,9 +200,9 @@ class TestWorkerRailE2EOffline(unittest.IsolatedAsyncioTestCase):
         await self.worker.stop()
         worker_task.cancel()
 
-    async def test_worker_rail_rejects_mixed_transports(self):
+    async def test_worker_rail_rejects_unsupported_transports(self):
         """
-        Проверяет, что смешанный запрос (['road', 'rail']) отклоняется
+        Проверяет, что запрос с неподдерживаемым транспортом (['road', 'sea']) отклоняется
         с ошибкой UNSUPPORTED_TRANSPORT по контракту.
         """
         worker_task = asyncio.create_task(self.worker.start())
@@ -216,7 +216,7 @@ class TestWorkerRailE2EOffline(unittest.IsolatedAsyncioTestCase):
                     "first_point": {"latitude": 59.7950, "longitude": 30.3850},
                     "second_point": {"latitude": 59.8240, "longitude": 30.4410},
                 },
-                "transports": ["road", "rail"],
+                "transports": ["road", "sea"],
             },
         }
 

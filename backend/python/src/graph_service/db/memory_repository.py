@@ -48,6 +48,7 @@ class MemoryJobRepository(JobRepository):
                     "updated_at": now,
                     "error": error,
                     "transport_type": transport_type,
+                    "transports": {transport_type: status} if transport_type else {},
                 }
             else:
                 self._job_states[job_id]["status"] = status
@@ -56,9 +57,13 @@ class MemoryJobRepository(JobRepository):
                     self._job_states[job_id]["error"] = error
                 if transport_type:
                     self._job_states[job_id]["transport_type"] = transport_type
+                    transports = self._job_states[job_id].setdefault("transports", {})
+                    transports[transport_type] = status
 
             if result_envelope is not None:
                 self._saved_results[job_id] = result_envelope
+                if transport_type:
+                    self._saved_results[f"{job_id}:{transport_type}"] = result_envelope
 
     def get_job_state(self, job_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
