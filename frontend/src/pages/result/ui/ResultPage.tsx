@@ -10,8 +10,9 @@ import {
   GraphLayer,
   analysisErrorMessage,
   analysisRequestErrorMessage,
-  isRetryableAnalysisRequest,
   GraphLegend,
+  getGraphTransports,
+  getNodeTransport,
   getNodeMetricRows,
   NodeCardOverlay,
   selectMetrics,
@@ -21,6 +22,7 @@ import {
   NODE_METRIC_NAMES,
   formatMetricValue,
   useAnalysisJob,
+  type GraphTransportMode,
   type JobState,
   type NodeSelection,
   NodeCard,
@@ -36,6 +38,11 @@ const STATUS_LABELS: Record<JobState, string> = {
   canceled: 'Отменено',
   completed: 'Завершено',
   failed: 'Ошибка',
+};
+
+const LAYER_LABELS: Record<GraphTransportMode, string> = {
+  road: 'Автодороги',
+  rail: 'Железные дороги',
 };
 
 function readSavedViewport(
@@ -112,36 +119,49 @@ function JobResult({ jobId }: { jobId: string }) {
   const { state } = useLocation();
   const viewport = readSavedViewport(state, jobId);
   const bounds = readSavedBounds(state, jobId);
-  const {
-    status,
-    result,
-    heartbeatFailure,
-    resultFailure,
-    isLoadingResult,
-    cancellation,
-    cancel,
-    retryResult,
-  } = useAnalysisJob(jobId);
+  const { status, result, heartbeatFailure, resultFailure } = useAnalysisJob(jobId);
+
+  const requestFailure =
+    [heartbeatFailure, resultFailure].find((failure) => failure && !failure.retrying) ??
+    heartbeatFailure ??
+    resultFailure;
+
+  const requestError = requestFailure?.error ?? null;
   const [searchParams] = useSearchParams();
   const { regions } = useRegions();
   const regionId =
     searchParams.get('region_id') ?? (regions?.length === 1 ? regions[0].region_id : null);
+  const returnToArea = () =>
+    navigate(regionId ? `/analysis?region_id=${encodeURIComponent(regionId)}` : '/start');
   const [metric, setMetric] = useState('');
   const [selection, setSelection] = useState<NodeSelection | null>(null);
+  const [hiddenModes, setHiddenModes] = useState<GraphTransportMode[]>([]);
 
   const job = status ?? result;
   const failureMessage =
     job?.error && job.error.code !== 'analysis_canceled' ? analysisErrorMessage(job.error) : null;
   const graph = result?.graph;
+  const modes = useMemo(() => (graph ? getGraphTransports(graph) : []), [graph]);
+  const visibleModes = modes.filter((mode) => !hiddenModes.includes(mode));
+  const visibleNodes =
+    graph?.nodes.filter((node) => visibleModes.includes(getNodeTransport(node))) ?? [];
+  const visibleNodeIds = new Set(visibleNodes.map(({ id }) => id));
   const hasGraph = !!graph?.nodes.length;
   const fallbackRegionId = viewport || hasGraph ? null : regionId;
   const { region: fallbackRegion } = useRegion(fallbackRegionId);
   const selectedNode =
     selection &&
-    graph?.nodes.find(
+    visibleNodes.find(
       (node) => node.id === selection.id && node.attributes?.object_type === selection.type
     );
   if (selection && !selectedNode) setSelection(null);
+
+  const setLayerVisibility = (mode: GraphTransportMode, visible: boolean) => {
+    setHiddenModes((current) =>
+      visible ? current.filter((hidden) => hidden !== mode) : [...current, mode]
+    );
+    if (!visible && selectedNode && getNodeTransport(selectedNode) === mode) setSelection(null);
+  };
 
   const { globalMetrics, metricsByNodeId } = selectMetrics(result?.metrics ?? []);
   const globalValues = new Map(globalMetrics.map(({ name, value }) => [name, value]));
@@ -151,80 +171,64 @@ function JobResult({ jobId }: { jobId: string }) {
     () => (latitude === undefined || longitude === undefined ? null : [latitude, longitude]),
     [latitude, longitude]
   );
-  const heartbeatUnavailable = heartbeatFailure?.retrying === false;
-  const resultUnavailable = resultFailure?.retrying === false;
-  const requestFailure = heartbeatUnavailable ? heartbeatFailure : resultFailure;
-  const requestFailed = heartbeatUnavailable || resultUnavailable;
-  const notFound = requestFailure?.error instanceof ApiError && requestFailure.error.status === 404;
+  const notFound = requestError instanceof ApiError && requestError.status === 404;
+  const requestFailed = !!requestFailure && !requestFailure.retrying;
   const isFinal = !!job && isFinalState(job.status);
-  const canceled = job?.status === 'canceled';
-  const isWaiting = !canceled && !requestFailed && !graph && (!isFinal || isLoadingResult);
-  const showRequestFailure = !canceled && requestFailed && !graph;
+  const isWaiting = !requestFailed && !graph && (!isFinal || !result);
   const changeArea = <Button onClick={() => navigate('/start')}>Начать новый анализ</Button>;
-  const retryResultControl = resultUnavailable &&
-    isRetryableAnalysisRequest(resultFailure.error) && (
-      <Button onClick={retryResult}>Повторить загрузку результата</Button>
-    );
-  const cancelControl = job && !isFinal && cancellation.type !== 'already_finished' && (
-    <Button
-      disabled={cancellation.type === 'sending' || job.status === 'cancel_requested'}
-      onClick={cancel}
-    >
-      {cancellation.type === 'sending' ? 'Отправляем запрос на отмену…' : 'Отменить анализ'}
-    </Button>
-  );
-  const waitingFailure = resultFailure ?? heartbeatFailure;
-  const waitingTitle = resultFailure
-    ? 'Повторяем загрузку результата'
-    : heartbeatFailure
-      ? 'Восстанавливаем соединение'
-      : isLoadingResult
-        ? 'Загружаем результат анализа'
-        : job?.status === 'queued'
-          ? 'Анализ в очереди'
-          : job?.status === 'cancel_requested'
-            ? 'Ожидаем отмены анализа'
-            : job?.status === 'running'
-              ? 'Выполняется анализ'
-              : 'Получаем состояние задачи';
+  const cancelControl =
+    job && !isFinal ? <Button onClick={returnToArea}>Отменить анализ</Button> : null;
+  const waitingTitle = requestError
+    ? 'Восстанавливаем соединение'
+    : job?.status === 'queued'
+      ? 'Анализ в очереди'
+      : job?.status === 'cancel_requested'
+        ? 'Ожидаем отмены анализа'
+        : job?.status === 'running'
+          ? 'Выполняется анализ'
+          : 'Получаем состояние задачи';
 
   const sidebar = notFound ? (
     <p className={styles.error}>Задача не найдена. Запустите новый анализ.</p>
   ) : (
     <>
-      <p className={styles.status} data-status={job?.status} role="status">
-        Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}
+      <p
+        className={styles.status}
+        data-status={requestFailed ? 'failed' : job?.status}
+        role="status"
+      >
+        Статус: {requestFailed ? 'Ошибка' : job ? STATUS_LABELS[job.status] : 'подключение...'}
       </p>
       {failureMessage && <p className={styles.error}>{failureMessage}</p>}
-      {graph && heartbeatFailure && (
+      {requestError && (
         <p className={styles.warning} role="alert">
-          Не удалось обновить статус. {analysisRequestErrorMessage(heartbeatFailure.error)}
+          {analysisRequestErrorMessage(requestError)}
         </p>
-      )}
-      {(graph || canceled) && resultFailure && (
-        <>
-          <p className={styles.warning} role="alert">
-            Не удалось загрузить результат. {analysisRequestErrorMessage(resultFailure.error)}
-          </p>
-          {retryResultControl}
-        </>
-      )}
-      {cancellation.type === 'failed' && (
-        <p className={styles.warning} role="alert">
-          Не удалось отменить анализ. {analysisRequestErrorMessage(cancellation.error)}
-        </p>
-      )}
-      {cancellation.type === 'already_finished' && (
-        <p role="status">{analysisRequestErrorMessage(cancellation.error)}</p>
       )}
       {job?.status === 'cancel_requested' && (
         <p role="status">Отмена запрошена. Ожидаем подтверждения сервера.</p>
       )}
-      {!isWaiting && !showRequestFailure && cancelControl}
-      {canceled && hasGraph && (
+      {!isWaiting && cancelControl}
+      {job?.status === 'canceled' && hasGraph && (
         <p role="status">Анализ отменён. Доступен ранее построенный граф.</p>
       )}
       {graph && !graph.nodes.length && <p>Граф в выбранной области пуст.</p>}
+
+      {modes.length > 0 && (
+        <fieldset className={styles.layers}>
+          <legend>Слои карты</legend>
+          {modes.map((mode) => (
+            <label key={mode}>
+              <input
+                type="checkbox"
+                checked={visibleModes.includes(mode)}
+                onChange={(event) => setLayerVisibility(mode, event.target.checked)}
+              />
+              {LAYER_LABELS[mode]}
+            </label>
+          ))}
+        </fieldset>
+      )}
 
       <MetricSelect
         names={NODE_METRIC_NAMES}
@@ -232,7 +236,10 @@ function JobResult({ jobId }: { jobId: string }) {
           ...new Map(
             (result?.metrics ?? [])
               .filter(
-                (m) => m.node_id !== undefined && NODE_METRIC_NAMES.some((name) => name === m.name)
+                (m) =>
+                  m.node_id !== undefined &&
+                  visibleNodeIds.has(m.node_id) &&
+                  NODE_METRIC_NAMES.some((name) => name === m.name)
               )
               .map((m) => [m.name, m])
           ).values(),
@@ -240,29 +247,33 @@ function JobResult({ jobId }: { jobId: string }) {
         value={metric}
         onChange={setMetric}
       />
-      <h4>Показатели региона</h4>
-      <table className={styles.metricsTable}>
-        <thead>
-          <tr>
-            <th scope="col">Показатель</th>
-            <th scope="col">Значение</th>
-          </tr>
-        </thead>
-        <tbody>
-          {REGION_METRIC_NAMES.map((name) => (
-            <tr key={name}>
-              <th scope="row">{METRIC_LABELS[name] ?? name}</th>
-              <td>{formatMetricValue(name, globalValues.get(name))}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!hasRegionalMetrics && !isFinal && !requestFailed && (
-        <p className={styles.muted}>
-          {hasGraph
-            ? 'Ожидаем значения метрик.'
-            : 'Значения появятся после построения графа и расчёта метрик.'}
-        </p>
+      {(!graph || modes.includes('road')) && (
+        <>
+          <h4>Показатели региона</h4>
+          <table className={styles.metricsTable}>
+            <thead>
+              <tr>
+                <th scope="col">Показатель</th>
+                <th scope="col">Значение</th>
+              </tr>
+            </thead>
+            <tbody>
+              {REGION_METRIC_NAMES.map((name) => (
+                <tr key={name}>
+                  <th scope="row">{METRIC_LABELS[name] ?? name}</th>
+                  <td>{formatMetricValue(name, globalValues.get(name))}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {!hasRegionalMetrics && !isFinal && !requestFailed && (
+            <p className={styles.muted}>
+              {hasGraph
+                ? 'Ожидаем значения метрик.'
+                : 'Значения появятся после построения графа и расчёта метрик.'}
+            </p>
+          )}
+        </>
       )}
     </>
   );
@@ -275,7 +286,14 @@ function JobResult({ jobId }: { jobId: string }) {
         bounds={bounds}
         showRegions={false}
         legend={
-          <GraphLegend colorBy={metric || undefined} graph={graph} metrics={result?.metrics} />
+          visibleModes.length > 0 && (
+            <GraphLegend
+              colorBy={metric || undefined}
+              nodes={visibleNodes}
+              visibleModes={visibleModes}
+              metrics={result?.metrics}
+            />
+          )
         }
       >
         {fallbackRegion && fallbackRegion.region_id === fallbackRegionId && (
@@ -285,6 +303,7 @@ function JobResult({ jobId }: { jobId: string }) {
           <GraphLayer
             metrics={result?.metrics ?? []}
             graph={graph}
+            visibleModes={visibleModes}
             colorBy={metric || undefined}
             selection={selection}
             onNodeSelect={setSelection}
@@ -296,6 +315,7 @@ function JobResult({ jobId }: { jobId: string }) {
               node={{
                 id: selectedNode.id,
                 kind: selectedNode.attributes?.object_type,
+                railKind: selectedNode.attributes?.node_kind,
                 name: selectedNode.attributes?.name,
                 connectionStatus: selectedNode.attributes?.is_isolated
                   ? (selectedNode.attributes.isolation_reason ?? 'Изолирован')
@@ -312,41 +332,27 @@ function JobResult({ jobId }: { jobId: string }) {
           <Message
             title={waitingTitle}
             description={
-              waitingFailure
-                ? `${analysisRequestErrorMessage(waitingFailure.error)} Повторяем запрос автоматически.`
+              requestError
+                ? `${analysisRequestErrorMessage(requestError)} Повторяем запрос автоматически.`
                 : job?.status === 'cancel_requested'
                   ? 'Запрос на отмену отправлен. Дождитесь подтверждения сервера.'
-                  : isLoadingResult
-                    ? 'Получаем данные анализа с сервера.'
-                    : 'Ожидаем готовности графа выбранной территории.'
+                  : 'Ожидаем готовности графа выбранной территории.'
             }
             icon={<Spinner size="large" text="" />}
             actions={cancelControl}
           />
         </div>
       )}
-      {showRequestFailure && requestFailure && (
+      {requestFailed && (
         <div className={styles.overlay}>
           <Message
-            title={
-              notFound
-                ? 'Анализ не найден'
-                : heartbeatUnavailable
-                  ? 'Не удалось обновить статус анализа'
-                  : 'Не удалось получить результат'
-            }
-            description={analysisRequestErrorMessage(requestFailure.error)}
-            actions={
-              <>
-                {cancelControl}
-                {retryResultControl}
-                {changeArea}
-              </>
-            }
+            title={notFound ? 'Анализ не найден' : 'Не удалось получить результат'}
+            description={analysisRequestErrorMessage(requestError)}
+            actions={changeArea}
           />
         </div>
       )}
-      {!hasGraph && (canceled || (!requestFailed && !isLoadingResult && isFinal && !!result)) && (
+      {!requestFailed && isFinal && !!result && !hasGraph && (
         <div className={styles.overlay}>
           <Message
             title={
@@ -381,7 +387,7 @@ export function ResultPage() {
       <ResultLayout
         sidebar={<p className={styles.error}>Нет данных анализа. Запустите новый анализ.</p>}
       >
-        <MapView showRegions={false} legend={<GraphLegend />} />
+        <MapView showRegions={false} />
         <div className={styles.overlay}>
           <Message
             title="Нет данных анализа"

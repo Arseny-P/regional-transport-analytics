@@ -13,6 +13,26 @@
   color: var(--text-primary);
 }
 
+.layers {
+  display: grid;
+  gap: 6px;
+  margin: 16px 0;
+  padding: 8px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.layers legend {
+  padding: 0 4px;
+  font-weight: 600;
+}
+
+.layers label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* Ошибки анализа и получения задачи. */
 .error {
   color: var(--error-msg);

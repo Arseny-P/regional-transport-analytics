@@ -1,7 +1,9 @@
 import { formatMetricValue } from '../config/metricLabels';
+import { railNodeLabel } from '../config/graphStyles';
+import type { GraphNode, RailNodeKind } from '../model/types';
 import styles from './NodeCard.module.css';
 
-type NodeKind = 'warehouse' | 'intersection' | 'road_node';
+type NodeKind = NonNullable<NonNullable<GraphNode['attributes']>['object_type']>;
 
 interface NodeMetric {
   id: string;
@@ -14,6 +16,7 @@ interface NodeCardProps {
   node: {
     id: string;
     kind?: NodeKind;
+    railKind?: RailNodeKind;
     name?: string;
     connectionStatus?: string;
   };
@@ -22,14 +25,19 @@ interface NodeCardProps {
 }
 
 // надо подумать над подписями
-const KIND_LABELS: Record<NodeKind, string> = {
+const KIND_LABELS: Record<Exclude<NodeKind, 'rail_node'>, string> = {
   road_node: 'Просто дорога',
   warehouse: 'Склад',
   intersection: 'Перекрёсток',
 };
 
 export function NodeCard({ node, metrics, onClose }: NodeCardProps) {
-  const kindLabel = node.kind ? KIND_LABELS[node.kind] : 'Вершина графа';
+  const kindLabel =
+    node.kind === 'rail_node'
+      ? railNodeLabel(node.railKind)
+      : node.kind
+        ? KIND_LABELS[node.kind]
+        : 'Вершина графа';
   const title = node.name?.trim() || kindLabel;
 
   return (
