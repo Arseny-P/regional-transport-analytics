@@ -101,12 +101,14 @@ func TestFullFlow(t *testing.T) {
 
 	for {
 		var result httpdto.AnalysisResult
-		err := requestJSON(flowCtx, client, http.MethodGet, "/analysis/result"+query, http.NoBody, "application/json", http.StatusOK, &result)
+		err := requestJSON(flowCtx, client, http.MethodGet, "/analysis/result"+query+"&is_road=true", http.NoBody, "application/json", http.StatusOK, &result)
 		require.NoError(t, context.Cause(flowCtx))
 		require.NoError(t, err)
 		require.Equal(t, jobID, result.JobID)
-		if result.Error != nil {
-			t.Fatalf("%s: %s", result.Error.Code, result.Error.Message)
+		for _, work := range result.WorkingStatuses {
+			if work.Error != nil {
+				t.Fatalf("%s: %s: %s", work.TransportType, work.Error.Code, work.Error.Message)
+			}
 		}
 
 		switch result.Status {
@@ -186,7 +188,6 @@ func keepAnalysisAlive(ctx context.Context, client *http.Client, jobID string) e
 func checkAnalysisResult(t *testing.T, result *httpdto.AnalysisResult) {
 	t.Helper()
 
-	require.True(t, result.GraphAvailable)
 	require.NotNil(t, result.Graph)
 	require.NotEmpty(t, result.Graph.Nodes)
 	require.NotEmpty(t, result.Graph.Edges)
@@ -215,7 +216,8 @@ func checkAnalysisResult(t *testing.T, result *httpdto.AnalysisResult) {
 	require.True(t, hasRoad, "expected a road edge in the offline graph")
 
 	if len(result.Metrics) > 0 {
-		require.True(t, result.MetricsAvailable)
+		require.Len(t, result.WorkingStatuses, 1)
+		require.True(t, result.WorkingStatuses[0].MetricsAvailable)
 	}
 	for _, metric := range result.Metrics {
 		require.NotEmpty(t, metric.Name)
