@@ -276,7 +276,7 @@ paths:
         Подтверждает активность пользователя, ожидающего результат задачи.
         Возвращает состояние, доступность результатов и ошибку,
         если она есть, тем же ответом, включая итоговое состояние.
-        Ответ содержит job_id, status, graph_available, metrics_available
+        Ответ содержит job_id, status и working_statuses
         и необязательное поле error. Сам граф и массив метрик в heartbeat
         не передаются: для них используется GET /analysis/result.
 
@@ -289,10 +289,10 @@ paths:
         Пользователю не нужно вручную запрашивать статус.
         Отдельной ручки статуса нет.
 
-        Когда хотя бы один из флагов graph_available или metrics_available
-        равен true либо задача перешла в итоговое состояние, frontend
+        Когда в working_statuses появился доступный граф или метрики
+        либо задача перешла в итоговое состояние, frontend
         запрашивает GET /analysis/result. После успешного получения результата
-        повторный запрос нужен при изменении status или любого из этих флагов.
+        повторный запрос нужен при изменении status или working_statuses.
         Получение итогового результата выполняется и при failed или canceled:
         у задачи может остаться доступный частичный результат.
         Временная ошибка получения результата допускает повтор GET без
@@ -300,7 +300,7 @@ paths:
         до успешного ответа. После итогового статуса heartbeat прекращается,
         но незавершённые повторы GET /analysis/result могут продолжаться.
 
-        Ошибка вычислений возвращается в error при HTTP 200.
+        Ошибки вычислений передаются в working_statuses соответствующего транспорта.
         Просроченный heartbeat также возвращает HTTP 200 с текущим состоянием
         задачи и флагами доступности результатов. В error передаётся код
         heartbeat_timeout_exceeded: heartbeat не поступал более 10 секунд.
@@ -322,7 +322,7 @@ paths:
         - $ref: '#/components/parameters/JobId'
       responses:
         '200':
-          description: Статус задачи и доступность результатов; ошибка анализа или просрочка heartbeat передаётся в необязательном поле error.
+          description: Статус задачи и доступность результатов. Просрочка heartbeat передаётся в необязательном поле error.
           content:
             application/json:
               schema:
@@ -333,28 +333,30 @@ paths:
                   value:
                     job_id: 550e8400-e29b-41d4-a716-446655440000
                     status: running
-                    graph_available: false
-                    metrics_available: false
+                    working_statuses:
+                      - {transport_type: road, graph_available: false, metrics_available: false}
                 heartbeatTimeout:
                   summary: Heartbeat просрочен, возвращается текущее состояние задачи.
                   value:
                     job_id: 550e8400-e29b-41d4-a716-446655440000
                     status: running
-                    graph_available: false
-                    metrics_available: false
+                    working_statuses:
+                      - {transport_type: road, graph_available: false, metrics_available: false}
                     error:
                       code: heartbeat_timeout_exceeded
                       message: Heartbeat не поступал более 10 секунд. Срок подтверждения активности истёк
-                failedWithPartialResult:
+                metricsFailedWithGraph:
                   summary: Анализ завершился ошибкой, сохранённый граф доступен.
                   value:
                     job_id: 550e8400-e29b-41d4-a716-446655440000
-                    status: failed
-                    graph_available: true
-                    metrics_available: false
-                    error:
-                      code: metrics_calculation_failed
-                      message: Не удалось рассчитать метрики.
+                    status: completed
+                    working_statuses:
+                      - transport_type: road
+                        graph_available: true
+                        metrics_available: false
+                        error:
+                          code: metrics_calculation_failed
+                          message: Не удалось рассчитать метрики.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -392,8 +394,8 @@ paths:
               example:
                 job_id: job-001
                 status: cancel_requested
-                graph_available: false
-                metrics_available: false
+                working_statuses:
+                  - {transport_type: road, graph_available: false, metrics_available: false}
         '200':
           description: Задача уже отменена.
           content:
@@ -403,8 +405,8 @@ paths:
               example:
                 job_id: job-001
                 status: canceled
-                graph_available: false
-                metrics_available: false
+                working_statuses:
+                  - {transport_type: road, graph_available: false, metrics_available: false}
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -437,7 +439,7 @@ paths:
 
         Для существующей задачи возвращается HTTP 200, в том числе пока
         она выполняется, при ошибке вычислений или отмене. Ошибка вычислений
-        описывается полем error с кодом и сообщением. HTTP 500 означает ошибку
+        передаётся в working_statuses соответствующего транспорта. HTTP 500 означает ошибку
         обработки самого запроса результата.
         Чтение результата не обновляет heartbeat и не запускает вычисления заново.
         Получение результата выполняется независимо от отправки heartbeat:
@@ -446,6 +448,18 @@ paths:
         Конкретный список показателей не ограничивается примерами в контракте.
       parameters:
         - $ref: '#/components/parameters/JobId'
+        - name: is_road
+          in: query
+          description: Включить данные дорожного графа и его метрик.
+          schema:
+            type: boolean
+            default: false
+        - name: is_rail
+          in: query
+          description: Включить данные железнодорожного графа и его метрик.
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: Текущее состояние задачи и доступные результаты, включая частичный результат.
@@ -459,8 +473,8 @@ paths:
                   value:
                     job_id: job-001
                     status: running
-                    graph_available: false
-                    metrics_available: false
+                    working_statuses:
+                      - {transport_type: road, graph_available: false, metrics_available: false}
                     graph: null
                     metrics: []
                 waitingForMetrics:
@@ -468,8 +482,8 @@ paths:
                   value:
                     job_id: job-001
                     status: running
-                    graph_available: true
-                    metrics_available: false
+                    working_statuses:
+                      - {transport_type: road, graph_available: true, metrics_available: false}
                     graph:
                       nodes:
                         - {id: '1', position: [30.3, 59.3]}
@@ -477,13 +491,18 @@ paths:
                       edges:
                         - {id: '1', source: '1', target: '2'}
                     metrics: []
-                metricsFailed:
+                metricsFailedWithGraph:
                   summary: Расчёт метрик завершился ошибкой; граф доступен.
                   value:
                     job_id: job-001
-                    status: failed
-                    graph_available: true
-                    metrics_available: false
+                    status: completed
+                    working_statuses:
+                      - transport_type: road
+                        graph_available: true
+                        metrics_available: false
+                        error:
+                          code: metrics_calculation_failed
+                          message: Не удалось рассчитать метрики.
                     graph:
                       nodes:
                         - {id: '1', position: [30.3, 59.3]}
@@ -491,9 +510,6 @@ paths:
                       edges:
                         - {id: '1', source: '1', target: '2'}
                     metrics: []
-                    error:
-                      code: metrics_calculation_failed
-                      message: Не удалось рассчитать метрики.
         '400':
           $ref: '#/components/responses/BadRequest'
         '404':
@@ -527,32 +543,34 @@ components:
               value:
                 job_id: 550e8400-e29b-41d4-a716-446655440000
                 status: running
-                graph_available: false
-                metrics_available: false
+                working_statuses:
+                  - {transport_type: road, graph_available: false, metrics_available: false}
             graphReady:
               summary: Граф можно получить, метрики ещё рассчитываются.
               value:
                 job_id: 550e8400-e29b-41d4-a716-446655440000
                 status: running
-                graph_available: true
-                metrics_available: false
+                working_statuses:
+                  - {transport_type: road, graph_available: true, metrics_available: false}
             completed:
               summary: Анализ завершён, граф и метрики доступны.
               value:
                 job_id: 550e8400-e29b-41d4-a716-446655440000
                 status: completed
-                graph_available: true
-                metrics_available: true
-            metricsFailed:
+                working_statuses:
+                  - {transport_type: road, graph_available: true, metrics_available: true}
+            metricsFailedWithGraph:
               summary: Расчёт метрик завершился ошибкой, граф сохранён.
               value:
                 job_id: 550e8400-e29b-41d4-a716-446655440000
-                status: failed
-                graph_available: true
-                metrics_available: false
-                error:
-                  code: metrics_calculation_failed
-                  message: Не удалось рассчитать метрики.
+                status: completed
+                working_statuses:
+                  - transport_type: road
+                    graph_available: true
+                    metrics_available: false
+                    error:
+                      code: metrics_calculation_failed
+                      message: Не удалось рассчитать метрики.
     BadRequest:
       description: Некорректный формат запроса или отсутствует обязательный параметр.
       content:
@@ -789,23 +807,23 @@ components:
       type: object
       description: |
         Состояние задачи без самого графа и массива метрик.
-        Оба флага доступности обязательны и имеют тип boolean.
-        Они отражают наличие сохранённых данных и не заменяют status:
-        частичный результат может быть доступен у running, failed или canceled.
-      required: [job_id, status, graph_available, metrics_available]
+        Доступность графа каждого транспорта передаётся в working_statuses.
+        Частичный результат может быть доступен у running, failed или canceled.
+        Многотранспортная задача остаётся running, пока есть незавершённые расчёты.
+        После окончания всех расчётов хотя бы один готовый граф даёт completed,
+        а отсутствие графов даёт failed.
+      required: [job_id, status]
       properties:
         job_id:
           $ref: '#/components/schemas/Identifier'
         status:
           $ref: '#/components/schemas/JobState'
-        graph_available:
-          type: boolean
-          description: В GET /analysis/result доступен сохранённый граф, в том числе пустой.
-        metrics_available:
-          type: boolean
-          description: В GET /analysis/result доступен сохранённый массив метрик, в том числе пустой.
+        working_statuses:
+          type: array
+          items:
+            $ref: '#/components/schemas/AnalysisWorkingStatus'
         error:
-          description: Необязательная причина ошибки анализа или просрочки heartbeat с кодом и понятным сообщением; при отсутствии ошибки поле не передаётся.
+          description: Необязательная причина просрочки heartbeat.
           allOf:
             - $ref: '#/components/schemas/AnalysisFailure'
 
@@ -816,14 +834,28 @@ components:
         code: {type: string}
         message: {type: string}
 
+    AnalysisWorkingStatus:
+      type: object
+      required: [transport_type, graph_available, metrics_available]
+      properties:
+        transport_type:
+          $ref: '#/components/schemas/Transport'
+        graph_available:
+          type: boolean
+        metrics_available:
+          type: boolean
+        error:
+          $ref: '#/components/schemas/AnalysisFailure'
+
     AnalysisResult:
       description: |
         Состояние задачи и доступные результаты одним ответом.
-        graph равен null, если граф ещё не получен; пустой построенный граф
-        представлен объектом с пустыми nodes и edges.
-        metrics содержит массив всех рассчитанных метрик либо [].
-        При ошибке вычислений присутствует error; без ошибки поле отсутствует.
-        Доступность графа и метрик соответствует graph_available и metrics_available.
+        Для одного транспорта данные находятся в graph и metrics.
+        Для нескольких транспортов данные находятся в work_results, а graph и metrics
+        имеют значения null и [] соответственно. working_statuses включает все
+        запрошенные при создании задачи транспорты, независимо от фильтра GET.
+        Фильтр управляет выдачей графов и массивов метрик.
+        Ошибки отдельных расчётов возвращаются в working_statuses.
       allOf:
         - $ref: '#/components/schemas/AnalysisStatus'
         - type: object
@@ -835,12 +867,27 @@ components:
                 - type: 'null'
             metrics:
               $ref: '#/components/schemas/Metrics'
+            work_results:
+              type: array
+              items:
+                type: object
+                required: [transport_type, graph, metrics]
+                properties:
+                  transport_type:
+                    $ref: '#/components/schemas/Transport'
+                  graph:
+                    oneOf:
+                      - $ref: '#/components/schemas/Graph'
+                      - type: 'null'
+                  metrics:
+                    $ref: '#/components/schemas/Metrics'
 
     Graph:
       type: object
       description: |
-        Дорожный граф задачи: склады, перекрёстки и промежуточные дорожные узлы.
-        Тип вершины передаётся в attributes.object_type, тип ребра — в attributes.edge_type.
+        Граф транспортной сети. Тип вершины передаётся в attributes.object_type.
+        Типы дорожных рёбер передаются в attributes.edge_type.
+        У железнодорожных вершин и рёбер attributes.transport_mode равен rail.
         Дорожные сегменты road отделены от связей склада с дорожной сетью access_connector.
         Изолированные склады сохраняются в nodes с attributes.is_isolated: true.
         Каждое ребро направлено от source к target; оба идентификатора ссылаются на nodes.
@@ -869,8 +916,7 @@ components:
                 properties:
                   object_type:
                     type: string
-                    enum: [warehouse, intersection, road_node]
-                    description: Склад, перекрёсток или промежуточный узел дорожной сети соответственно.
+                    enum: [warehouse, intersection, road_node, rail_node, rail_facility]
                   name:
                     type: string
                     description: Отображаемое название вершины.
