@@ -165,6 +165,7 @@ export function AnalysisPage() {
       {(!regionId || regionError) && (
         <div className={styles.messageOverlay}>
           <Message
+            variant={regionError ? 'error' : undefined}
             title={regionId ? 'Не удалось загрузить регион' : 'Регион не выбран'}
             description={
               regionError
