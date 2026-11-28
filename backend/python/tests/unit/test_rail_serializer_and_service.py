@@ -1,5 +1,8 @@
 import pytest
+from unittest.mock import patch
 import networkx as nx
+
+from graph_service.config import config
 from shapely.geometry import LineString
 
 from graph_service.domain.models import (
@@ -115,7 +118,8 @@ def test_territory_analysis_service_rail_shushary():
         save_artifacts=False,
     )
 
-    resp = service.run_analysis(req)
+    with patch.object(config, "osm_offline_mode", True):
+        resp = service.run_analysis(req)
     assert resp.status == AnalysisStatus.SUCCESS.value
     assert resp.summary["total_rail_nodes"] == 86
     assert resp.summary["total_physical_segments"] == 90

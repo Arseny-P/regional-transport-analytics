@@ -1,8 +1,10 @@
 import os
 import unittest
+from unittest.mock import patch
 import networkx as nx
 from shapely.geometry import LineString
 
+from graph_service.config import config
 from graph_service.domain.models import TerritoryBounds, RailNodeKind, RailObjectType
 from graph_service.domain.errors import OfflineDataNotFoundError
 from graph_service.algorithms.rail_network_service import RailNetworkService
@@ -15,7 +17,8 @@ class TestRailNetworkService(unittest.TestCase):
     """
 
     def setUp(self):
-        os.environ["OSM_OFFLINE_MODE"] = "true"
+        self._prev_offline = config.osm_offline_mode
+        config.osm_offline_mode = True
         self.service = RailNetworkService(storage_dir="data")
         self.shushary_bbox = TerritoryBounds(
             min_lat=59.7950,
@@ -23,6 +26,9 @@ class TestRailNetworkService(unittest.TestCase):
             max_lat=59.8240,
             max_lon=30.4410,
         )
+
+    def tearDown(self):
+        config.osm_offline_mode = self._prev_offline
 
     def test_classify_way(self):
         # 1. Целевая железная дорога

@@ -1,9 +1,11 @@
+import os
 import json
 import unittest
 import networkx as nx
 
 from graph_service.domain.models import RailConnectionStatus, RailObjectType, RailNodeKind
 from graph_service.algorithms.rail_facility_service import RailFacilityService
+from graph_service.fixtures import FIXTURES_DIR
 
 
 class TestRailFacilityService(unittest.TestCase):
@@ -18,7 +20,7 @@ class TestRailFacilityService(unittest.TestCase):
 
     def test_extract_station_candidates_from_fixture(self):
         # Загрузка фикстуры объектов Шушар
-        fixture_path = "backend/python/src/graph_service/fixtures/shushary_rail_objects.json"
+        fixture_path = os.path.join(FIXTURES_DIR, "shushary_rail_objects.json")
         with open(fixture_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
@@ -57,7 +59,7 @@ class TestRailFacilityService(unittest.TestCase):
         # Реальное ребро между 101 и 103 (но НЕ между 101 и 102)
         graph.add_edge("osm_node:101", "osm_node:103", length_m=150.0)
 
-        fixture_path = "backend/python/src/graph_service/fixtures/shushary_rail_objects.json"
+        fixture_path = os.path.join(FIXTURES_DIR, "shushary_rail_objects.json")
         with open(fixture_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
