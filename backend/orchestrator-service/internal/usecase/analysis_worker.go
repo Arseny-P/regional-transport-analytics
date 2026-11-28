@@ -54,16 +54,14 @@ func (aw *AnalysisWorker) UpdateHeartbeat(jobID uuid.UUID, receivedAt, deadline 
 }
 
 func (aw *AnalysisWorker) GetHeartbeatResponse(ctx context.Context, jobID uuid.UUID) (domain.HeartbeatResponse, error) {
-	result, err := aw.jobRepository.GetAnalysisResult(ctx, jobID)
+	result, err := aw.jobRepository.GetAnalysisResult(ctx, jobID, []domain.Transport{})
 	if err != nil {
 		return domain.HeartbeatResponse{}, err
 	}
 
 	response := domain.HeartbeatResponse{
-		Status:           result.Payload.Status,
-		GraphAvailable:   result.GraphAvailable,
-		MetricsAvailable: result.MetricsAvailable,
-		Error:            result.Payload.Error,
+		Status:      result.Payload.Status,
+		WorkResults: result.WorkResults,
 	}
 
 	if result.Payload.Status != "queued" && result.Payload.Status != "running" {
@@ -153,8 +151,7 @@ func (aw *AnalysisWorker) CheckInactiveJobs(ctx context.Context) {
 				aw.mu.Unlock()
 
 			}()
-			// тут нужны транзакции на каждую job я вижу это так мб неоптимально но хз если честно типо нужен update и запись в outbox ток дело в дублировании кода в целом мозешь в postgres вынести функции эти отдельные и с тра
-			// нзакцией как то связать или не бля
+
 		}
 
 	}()
@@ -162,6 +159,3 @@ func (aw *AnalysisWorker) CheckInactiveJobs(ctx context.Context) {
 	aw.mu.Unlock()
 
 }
-
-// касаемо вот это типо писать надо в одной транзакции и апдейт и в outbox и получается дерьмо поскольку долго нутипо если будем стопариться так то такое сбебе я думаю удалить и перенсти
-// в другое место ну просто в слайс мб эти элементы откуда отдельная функция будет писать уже и всё)

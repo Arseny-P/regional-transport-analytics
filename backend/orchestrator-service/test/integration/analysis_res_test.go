@@ -85,7 +85,7 @@ func (env *testEnvironment) testAnalysisResult(t *testing.T) {
 	var result httpdto.AnalysisResult
 	for {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			env.server.URL+"/analysis/result?job_id="+jobID.String(), http.NoBody)
+			env.server.URL+"/analysis/result?job_id="+jobID.String()+"&is_road=true", http.NoBody)
 		checkError(t, err, "create result request")
 		response, err := env.server.Client().Do(req)
 		checkError(t, err, "get analysis result over HTTP")
@@ -110,8 +110,10 @@ func (env *testEnvironment) testAnalysisResult(t *testing.T) {
 
 	expected := httpdto.AnalysisResult{
 		JobID: jobID.String(), Status: httpdto.Completed,
-		GraphAvailable: true, MetricsAvailable: true,
 		Graph: graph, Metrics: metrics,
+		WorkingStatuses: []httpdto.WorkingStatus{
+			{TransportType: "road", GraphAvailable: true, MetricsAvailable: true},
+		},
 	}
 	if !reflect.DeepEqual(expected, result) {
 		t.Errorf("HTTP result = %#v, want %#v", result, expected)
@@ -172,17 +174,16 @@ func (env *testEnvironment) testStatus(t *testing.T) {
 	if result.JobID != jobID.String() {
 		t.Errorf("HTTP job_id = %q, want %s", result.JobID, jobID)
 	}
-	if result.GraphAvailable || result.MetricsAvailable {
-		t.Errorf("results should be unavailable: graph=%t metrics=%t", result.GraphAvailable, result.MetricsAvailable)
-	}
 	if result.Graph != nil {
 		t.Error("HTTP graph should be null")
 	}
 	if result.Metrics == nil || len(result.Metrics) != 0 {
 		t.Errorf("HTTP metrics = %#v, want an empty array", result.Metrics)
 	}
-	if result.Error != nil {
-		t.Errorf("unexpected analysis error: %+v", result.Error)
+	for _, work := range result.WorkingStatuses {
+		if work.GraphAvailable || work.MetricsAvailable || work.Error != nil {
+			t.Errorf("unexpected working status: %+v", work)
+		}
 	}
 }
 

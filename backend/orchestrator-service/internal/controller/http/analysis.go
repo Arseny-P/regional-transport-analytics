@@ -3,6 +3,7 @@ package httpcontroller
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"orchestrator-service/internal/domain"
 	"orchestrator-service/internal/dto"
 	httpdto "orchestrator-service/internal/dto/http"
@@ -44,15 +45,9 @@ func (hc *HTTPController) SendAnalysisHeartbeatHandler() http.HandlerFunc {
 			return
 		}
 		body := httpdto.AnalysisStatus{
-			JobID:            jobIDString,
-			Status:           httpdto.JobState(response.Status),
-			GraphAvailable:   response.GraphAvailable,
-			MetricsAvailable: response.MetricsAvailable,
-		}
-		if response.Error != nil {
-			body.Error = &httpdto.AnalysisFailure{
-				Code: response.Error.Code, Message: response.Error.Message,
-			}
+			JobID:           jobIDString,
+			Status:          httpdto.JobState(response.Status),
+			WorkingStatuses: analysisWorkingStatuses(response.WorkResults),
 		}
 		if heartbeatErr != nil {
 			status, errorBody := ReturnErrorRespWithCode(heartbeatErr)
@@ -105,15 +100,9 @@ func (hc *HTTPController) CancelAnalysisHandler() http.HandlerFunc {
 		}
 
 		body := httpdto.AnalysisStatus{
-			JobID:            result.JobID.String(),
-			Status:           httpdto.JobState(result.Payload.Status),
-			GraphAvailable:   result.GraphAvailable,
-			MetricsAvailable: result.MetricsAvailable,
-		}
-		if result.Payload.Error != nil {
-			body.Error = &httpdto.AnalysisFailure{
-				Code: result.Payload.Error.Code, Message: result.Payload.Error.Message,
-			}
+			JobID:           result.JobID.String(),
+			Status:          httpdto.JobState(result.Payload.Status),
+			WorkingStatuses: analysisWorkingStatuses(result.WorkResults),
 		}
 		status := http.StatusOK
 		if pending {
@@ -126,6 +115,7 @@ func (hc *HTTPController) CancelAnalysisHandler() http.HandlerFunc {
 func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		jobIDString := r.URL.Query().Get("job_id")
+
 		if jobIDString == "" {
 			hc.writeError(w, errMissingJobID)
 			return
@@ -201,7 +191,8 @@ func (hc *HTTPController) CreateAnalysisHandler() http.HandlerFunc {
 
 func (hc *HTTPController) GetAnalysisResultHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		jobIDString := r.URL.Query().Get("job_id")
+		query := r.URL.Query()
+		jobIDString := query.Get("job_id")
 		if jobIDString == "" {
 			hc.writeError(w, errMissingJobID)
 			return
@@ -211,7 +202,14 @@ func (hc *HTTPController) GetAnalysisResultHandler() http.HandlerFunc {
 			hc.writeError(w, errInvalidJobID)
 			return
 		}
-		result, err := hc.jobUsecase.GetAnalysisResult(r.Context(), jobID)
+		transports, invalidField := analysisResultTransports(query)
+		if invalidField != "" {
+			hc.WriteResponse(w, http.StatusBadRequest, httpdto.Error{
+				Code: "invalid_boolean", Field: invalidField, Message: "Ожидается true или false",
+			})
+			return
+		}
+		result, err := hc.jobUsecase.GetAnalysisResult(r.Context(), jobID, transports)
 		if err != nil {
 			status, _ := ReturnErrorRespWithCode(err)
 			if status == http.StatusInternalServerError && r.Context().Err() == nil {
@@ -221,45 +219,94 @@ func (hc *HTTPController) GetAnalysisResultHandler() http.HandlerFunc {
 			return
 		}
 		resp := httpdto.AnalysisResult{
-			JobID:            result.JobID.String(),
-			Status:           httpdto.JobState(result.Payload.Status),
-			GraphAvailable:   result.GraphAvailable,
-			MetricsAvailable: result.MetricsAvailable,
-			Metrics:          make(httpdto.Metrics, 0, len(result.Payload.Metrics)),
+			JobID:           result.JobID.String(),
+			Status:          httpdto.JobState(result.Payload.Status),
+			WorkingStatuses: analysisWorkingStatuses(result.WorkResults),
+			Graph:           analysisGraph(result.Payload.Graph),
+			Metrics:         analysisMetrics(result.Payload.Metrics),
 		}
-		if result.Payload.Error != nil {
-			resp.Error = &httpdto.AnalysisFailure{
-				Code: result.Payload.Error.Code, Message: result.Payload.Error.Message,
-			}
-		}
-		if graph := result.Payload.Graph; graph != nil {
-			resp.Graph = &httpdto.Graph{
-				Nodes: make([]dto.GraphNode, 0, len(graph.Nodes)),
-				Edges: make([]dto.GraphEdge, 0, len(graph.Edges)),
-			}
-			for _, node := range graph.Nodes {
-				resp.Graph.Nodes = append(resp.Graph.Nodes, dto.GraphNode{
-					ID: node.ID, Position: node.Position, Attributes: node.Attributes,
+		if len(result.WorkResults) > 1 {
+			resp.WorkResults = make([]httpdto.WorkResult, 0, len(result.WorkResults))
+			for _, work := range result.WorkResults {
+				resp.WorkResults = append(resp.WorkResults, httpdto.WorkResult{
+					TransportType: string(work.TransportType),
+					Graph:         analysisGraph(work.Payload.Graph),
+					Metrics:       analysisMetrics(work.Payload.Metrics),
 				})
 			}
-			for _, edge := range graph.Edges {
-				resp.Graph.Edges = append(resp.Graph.Edges, dto.GraphEdge{
-					ID: edge.ID, Source: edge.Source, Target: edge.Target,
-					SegmentID: edge.SegmentID,
-					Geometry:  edge.Geometry, Attributes: edge.Attributes,
-				})
-			}
-		}
-		var dtoMetric dto.Metric
-		for _, metric := range result.Payload.Metrics {
-			dtoMetric = dto.Metric{Name: metric.Name, Value: metric.Value}
-			if metric.NodeID != nil {
-				dtoMetric.NodeID = metric.NodeID
-			}
-			resp.Metrics = append(resp.Metrics, dtoMetric)
 		}
 		hc.WriteResponse(w, http.StatusOK, resp)
 	}
+}
+
+func analysisResultTransports(query url.Values) (transports []domain.Transport, invalidField string) {
+	options := [...]struct {
+		field     string
+		transport domain.Transport
+	}{
+		{field: "is_road", transport: domain.Road},
+		{field: "is_rail", transport: domain.Rail},
+	}
+	transports = make([]domain.Transport, 0, len(options))
+	for _, option := range options {
+		if !query.Has(option.field) {
+			continue
+		}
+		switch query.Get(option.field) {
+		case "true":
+			transports = append(transports, option.transport)
+		case "false":
+		default:
+			return nil, option.field
+		}
+	}
+	return transports, ""
+}
+
+func analysisWorkingStatuses(works []*domain.WorksRes) []httpdto.WorkingStatus {
+	statuses := make([]httpdto.WorkingStatus, 0, len(works))
+	for _, work := range works {
+		status := httpdto.WorkingStatus{
+			TransportType:    string(work.TransportType),
+			GraphAvailable:   work.GraphAvailable,
+			MetricsAvailable: work.MetricsAvailable,
+		}
+		if err := work.Payload.Error; err != nil {
+			status.Error = &httpdto.AnalysisFailure{Code: err.Code, Message: err.Message}
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
+func analysisGraph(graph *domain.Graph) *httpdto.Graph {
+	if graph == nil {
+		return nil
+	}
+	result := &httpdto.Graph{
+		Nodes: make([]dto.GraphNode, 0, len(graph.Nodes)),
+		Edges: make([]dto.GraphEdge, 0, len(graph.Edges)),
+	}
+	for _, node := range graph.Nodes {
+		result.Nodes = append(result.Nodes, dto.GraphNode{
+			ID: node.ID, Position: node.Position, Attributes: node.Attributes,
+		})
+	}
+	for _, edge := range graph.Edges {
+		result.Edges = append(result.Edges, dto.GraphEdge{
+			ID: edge.ID, Source: edge.Source, Target: edge.Target,
+			SegmentID: edge.SegmentID, Geometry: edge.Geometry, Attributes: edge.Attributes,
+		})
+	}
+	return result
+}
+
+func analysisMetrics(metrics []domain.Metric) httpdto.Metrics {
+	result := make(httpdto.Metrics, 0, len(metrics))
+	for _, metric := range metrics {
+		result = append(result, dto.Metric{NodeID: metric.NodeID, Name: metric.Name, Value: metric.Value})
+	}
+	return result
 }
 
 func validateAnalysisRequest(req httpdto.CreateAnalysisRequest) error {

@@ -15,17 +15,13 @@ import (
 func TestAnalysisWorker(t *testing.T) {
 	id := uuid.New()
 	analysisResult := domain.AnalysisResult{
-		JobID:            id,
-		GraphAvailable:   true,
-		MetricsAvailable: true,
+		JobID: id,
 		Payload: domain.AnalysisPayload{
 			Status: "running",
 		},
 	}
 	heartbeatResponse := domain.HeartbeatResponse{
-		Status:           "running",
-		GraphAvailable:   true,
-		MetricsAvailable: true,
+		Status: "running",
 	}
 	testTable := []struct {
 		TestName               string
@@ -79,9 +75,7 @@ func TestAnalysisWorker(t *testing.T) {
 			ExpectedDeadlineOffset: 10 * time.Second,
 			AnalysisRes:            analysisResult,
 			ExpectedHeartbeatRes: domain.HeartbeatResponse{
-				Status:           "running",
-				GraphAvailable:   true,
-				MetricsAvailable: true,
+				Status: "running",
 			},
 			ExpectedHeartbeatErr: domain.ErrHeartbeatTimeoutExceeded,
 		},
@@ -117,17 +111,13 @@ func TestAnalysisWorker(t *testing.T) {
 			ReceivedAtOffset:       10 * time.Second,
 			ExpectedDeadlineOffset: 20 * time.Second,
 			AnalysisRes: domain.AnalysisResult{
-				JobID:            id,
-				GraphAvailable:   true,
-				MetricsAvailable: true,
+				JobID: id,
 				Payload: domain.AnalysisPayload{
 					Status: "completed",
 				},
 			},
 			ExpectedHeartbeatRes: domain.HeartbeatResponse{
-				Status:           "completed",
-				GraphAvailable:   true,
-				MetricsAvailable: true,
+				Status: "completed",
 			},
 		},
 	}

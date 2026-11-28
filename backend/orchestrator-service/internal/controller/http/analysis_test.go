@@ -23,7 +23,7 @@ type MockJobUsecase struct {
 	err     error
 }
 
-func (mockU *MockJobUsecase) GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error) {
+func (mockU *MockJobUsecase) GetAnalysisResult(context.Context, uuid.UUID, []domain.Transport) (domain.AnalysisResult, error) {
 	return mockU.result, mockU.err
 }
 
@@ -77,10 +77,17 @@ func TestSendAnalysisHeartbeatHandler(t *testing.T) {
 			ExpectedCode: http.StatusOK,
 			ExpectedResp: httpdto.AnalysisStatus{
 				JobID: id.String(), Status: httpdto.Running,
-				GraphAvailable: true,
+				WorkingStatuses: []httpdto.WorkingStatus{
+					{TransportType: "road", GraphAvailable: true},
+					{TransportType: "rail"},
+				},
 			},
 			DomainResponse: domain.HeartbeatResponse{
-				Status: "running", GraphAvailable: true,
+				Status: "running",
+				WorkResults: []*domain.WorksRes{
+					{TransportType: domain.Road, GraphAvailable: true},
+					{TransportType: domain.Rail},
+				},
 			},
 		},
 		{
@@ -89,11 +96,11 @@ func TestSendAnalysisHeartbeatHandler(t *testing.T) {
 			ExpectedCode: http.StatusOK,
 			ExpectedResp: httpdto.AnalysisStatus{
 				JobID: id.String(), Status: httpdto.Completed,
-				GraphAvailable:   true,
-				MetricsAvailable: true,
+				WorkingStatuses: []httpdto.WorkingStatus{{TransportType: "road", MetricsAvailable: true}},
 			},
 			DomainResponse: domain.HeartbeatResponse{
-				Status: "completed", GraphAvailable: true, MetricsAvailable: true,
+				Status:      "completed",
+				WorkResults: []*domain.WorksRes{{TransportType: domain.Road, MetricsAvailable: true}},
 			},
 		},
 		{
@@ -102,16 +109,17 @@ func TestSendAnalysisHeartbeatHandler(t *testing.T) {
 			ExpectedCode: http.StatusOK,
 			ExpectedResp: httpdto.AnalysisStatus{
 				JobID: id.String(), Status: httpdto.Failed,
-				GraphAvailable: true,
-				Error: &httpdto.AnalysisFailure{
+				WorkingStatuses: []httpdto.WorkingStatus{{TransportType: "road", Error: &httpdto.AnalysisFailure{
 					Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики",
-				},
+				}}},
 			},
 			DomainResponse: domain.HeartbeatResponse{
-				Status: "failed", GraphAvailable: true,
-				Error: &domain.ErrorResp{
-					Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики",
-				},
+				Status: "failed",
+				WorkResults: []*domain.WorksRes{{TransportType: domain.Road,
+					Payload: domain.AnalysisPayload{Error: &domain.ErrorResp{
+						Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики",
+					}},
+				}},
 			},
 		},
 		{
@@ -272,16 +280,12 @@ func TestCancelAnalysisHandler(t *testing.T) {
 		Payload: domain.AnalysisPayload{
 			Status: "cancel_requested",
 		},
-		GraphAvailable:   true,
-		MetricsAvailable: true,
+		WorkResults: []*domain.WorksRes{{TransportType: domain.Road, MetricsAvailable: true}},
 	}
 	canceledResult := domain.AnalysisResult{
 		JobID: id,
 		Payload: domain.AnalysisPayload{
 			Status: "canceled",
-			Error: &domain.ErrorResp{
-				Code: "analysis_canceled", Message: "Анализ отменён",
-			},
 		},
 	}
 	testTable := []struct {
@@ -302,7 +306,7 @@ func TestCancelAnalysisHandler(t *testing.T) {
 			ExpectedCode: http.StatusAccepted,
 			ExpectedResp: httpdto.AnalysisStatus{
 				JobID: id.String(), Status: httpdto.CancelRequested,
-				GraphAvailable: true, MetricsAvailable: true,
+				WorkingStatuses: []httpdto.WorkingStatus{{TransportType: "road", MetricsAvailable: true}},
 			},
 		},
 		{
@@ -312,9 +316,6 @@ func TestCancelAnalysisHandler(t *testing.T) {
 			ExpectedCode: http.StatusOK,
 			ExpectedResp: httpdto.AnalysisStatus{
 				JobID: id.String(), Status: httpdto.Canceled,
-				Error: &httpdto.AnalysisFailure{
-					Code: "analysis_canceled", Message: "Анализ отменён",
-				},
 			},
 		},
 		{
@@ -510,7 +511,7 @@ func TestGetAnalysisResultHandler(t *testing.T) {
 			TestName: "Готовый результат сохраняет segment_id, node_id и attributes",
 			JobID:    id.String(),
 			Result: domain.AnalysisResult{
-				JobID: id, GraphAvailable: true, MetricsAvailable: true,
+				JobID: id,
 				Payload: domain.AnalysisPayload{
 					Status: "completed", Graph: graph,
 					Metrics: []domain.Metric{
@@ -523,7 +524,7 @@ func TestGetAnalysisResultHandler(t *testing.T) {
 			ExpectedCode: http.StatusOK,
 			ExpectedResponse: httpdto.AnalysisResult{
 				JobID: id.String(), Status: httpdto.Completed,
-				GraphAvailable: true, MetricsAvailable: true, Graph: expectedGraph,
+				Graph: expectedGraph,
 				Metrics: httpdto.Metrics{
 					{NodeID: &firstNodeID, Name: "pagerank", Value: 0.4},
 					{Name: "vertex_count", Value: 3},
@@ -546,44 +547,80 @@ func TestGetAnalysisResultHandler(t *testing.T) {
 			TestName: "Граф готов, метрики ещё не получены",
 			JobID:    id.String(),
 			Result: domain.AnalysisResult{
-				JobID: id, GraphAvailable: true,
+				JobID:   id,
 				Payload: domain.AnalysisPayload{Status: "running", Graph: graph},
 			},
 			ExpectedCode: http.StatusOK,
 			ExpectedResponse: httpdto.AnalysisResult{
-				JobID: id.String(), Status: httpdto.Running, GraphAvailable: true,
+				JobID: id.String(), Status: httpdto.Running,
 				Graph: expectedGraph, Metrics: httpdto.Metrics{},
+			},
+		},
+		{
+			TestName: "ЖД-граф доступен при ошибке дорожного анализа",
+			JobID:    id.String(),
+			Result: domain.AnalysisResult{
+				JobID:   id,
+				Payload: domain.AnalysisPayload{Status: "completed"},
+				WorkResults: []*domain.WorksRes{
+					{TransportType: domain.Road,
+						Payload: domain.AnalysisPayload{Error: &domain.ErrorResp{
+							Code: "graph_build_failed", Message: "Не удалось построить дорожный граф",
+						}}},
+					{TransportType: domain.Rail, GraphAvailable: true,
+						Payload: domain.AnalysisPayload{Graph: legacyGraph}},
+				},
+			},
+			ExpectedCode: http.StatusOK,
+			ExpectedResponse: httpdto.AnalysisResult{
+				JobID: id.String(), Status: httpdto.Completed, Metrics: httpdto.Metrics{},
+				WorkingStatuses: []httpdto.WorkingStatus{
+					{TransportType: "road", Error: &httpdto.AnalysisFailure{
+						Code: "graph_build_failed", Message: "Не удалось построить дорожный граф",
+					}},
+					{TransportType: "rail", GraphAvailable: true},
+				},
+				WorkResults: []httpdto.WorkResult{
+					{TransportType: "road", Metrics: httpdto.Metrics{}},
+					{TransportType: "rail", Graph: expectedLegacyGraph, Metrics: httpdto.Metrics{}},
+				},
 			},
 		},
 		{
 			TestName: "Ошибка анализа с сохранённым графом",
 			JobID:    id.String(),
 			Result: domain.AnalysisResult{
-				JobID: id, GraphAvailable: true,
+				JobID: id,
 				Payload: domain.AnalysisPayload{
-					Status: "failed", Graph: graph,
-					Error: &domain.ErrorResp{Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики"},
+					Status: "completed", Graph: graph,
 				},
+				WorkResults: []*domain.WorksRes{{TransportType: domain.Road, GraphAvailable: true,
+					Payload: domain.AnalysisPayload{Error: &domain.ErrorResp{
+						Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики",
+					}},
+				}},
 			},
 			ExpectedCode: http.StatusOK,
 			ExpectedResponse: httpdto.AnalysisResult{
-				JobID: id.String(), Status: httpdto.Failed, GraphAvailable: true,
+				JobID: id.String(), Status: httpdto.Completed,
 				Graph: expectedGraph, Metrics: httpdto.Metrics{},
-				Error: &httpdto.AnalysisFailure{Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики"},
+				WorkingStatuses: []httpdto.WorkingStatus{{TransportType: "road", GraphAvailable: true,
+					Error: &httpdto.AnalysisFailure{Code: "metrics_calculation_failed", Message: "Не удалось рассчитать метрики"},
+				}},
 			},
 		},
 		{
 			TestName: "Построенный пустой граф и пустые метрики доступны",
 			JobID:    id.String(),
 			Result: domain.AnalysisResult{
-				JobID: id, GraphAvailable: true, MetricsAvailable: true,
+				JobID: id,
 				Payload: domain.AnalysisPayload{
 					Status: "completed", Graph: &domain.Graph{}, Metrics: []domain.Metric{},
 				},
 			},
 			ExpectedCode: http.StatusOK,
 			ExpectedResponse: httpdto.AnalysisResult{
-				JobID: id.String(), Status: httpdto.Completed, GraphAvailable: true, MetricsAvailable: true,
+				JobID: id.String(), Status: httpdto.Completed,
 				Graph: &httpdto.Graph{Nodes: []dto.GraphNode{}, Edges: []dto.GraphEdge{}}, Metrics: httpdto.Metrics{},
 			},
 		},
@@ -591,7 +628,7 @@ func TestGetAnalysisResultHandler(t *testing.T) {
 			TestName: "Старый результат без segment_id и node_id",
 			JobID:    id.String(),
 			Result: domain.AnalysisResult{
-				JobID: id, GraphAvailable: true, MetricsAvailable: true,
+				JobID: id,
 				Payload: domain.AnalysisPayload{
 					Status: "completed", Graph: legacyGraph,
 					Metrics: []domain.Metric{{Name: "vertex_count", Value: 2}},
@@ -599,7 +636,7 @@ func TestGetAnalysisResultHandler(t *testing.T) {
 			},
 			ExpectedCode: http.StatusOK,
 			ExpectedResponse: httpdto.AnalysisResult{
-				JobID: id.String(), Status: httpdto.Completed, GraphAvailable: true, MetricsAvailable: true,
+				JobID: id.String(), Status: httpdto.Completed,
 				Graph: expectedLegacyGraph, Metrics: httpdto.Metrics{{Name: "vertex_count", Value: 2}},
 			},
 		},

@@ -41,7 +41,7 @@ func (mockJ *MockJobRepository) CreateJob(_ context.Context, job *domain.Job) er
 	return nil
 }
 
-func (mockJ *MockJobRepository) GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error) {
+func (mockJ *MockJobRepository) GetAnalysisResult(context.Context, uuid.UUID, []domain.Transport) (domain.AnalysisResult, error) {
 	if mockJ.analysisErr != nil {
 		return domain.AnalysisResult{}, mockJ.analysisErr
 	}

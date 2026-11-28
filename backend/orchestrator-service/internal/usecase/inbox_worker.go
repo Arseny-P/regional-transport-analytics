@@ -73,7 +73,7 @@ func (iw *InboxWorker) Run(ctx context.Context) {
 		} else if message.status == "FETCHED" {
 			createAnalysisErr := iw.inboxRepository.CreateAnalysisRes(ctx, &message.inboxMessage)
 			if createAnalysisErr != nil {
-				if errors.Is(createAnalysisErr, domain.ErrJobNotFound) {
+				if errors.Is(createAnalysisErr, domain.ErrJobNotFound) || errors.Is(createAnalysisErr, domain.ErrInvalidKafkaMessage) {
 					dlqMessage = newDLQMessage(&message.kafkaMessage, createAnalysisErr)
 					message.status = "DLQ_PENDING"
 					continue
