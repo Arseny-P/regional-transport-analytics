@@ -9,6 +9,7 @@ from graph_service.domain.models import (
     TerritoryBounds,
     TerritorySourceType,
     FacilitySourceType,
+    TransportMode,
 )
 from graph_service.domain.errors import (
     GraphServiceError,
@@ -231,12 +232,18 @@ class AnalysisWorker:
                 max_lon=east,
             )
 
+            # Определение режима транспорта (автомобильный по умолчанию, либо ЖД)
+            transport_mode = TransportMode.ROAD.value
+            if payload.transports and "rail" in payload.transports:
+                transport_mode = TransportMode.RAIL.value
+
             request = AnalysisRequest(
                 territory_type=TerritorySourceType.BBOX.value,
                 bbox=bbox,
                 facility_source=FacilitySourceType.OSM.value,
                 osm_facilities_limit=100,
                 knn=None,
+                transport_mode=transport_mode,
                 save_artifacts=True,
                 include_geojson_payload=False,
                 refetch=False,
@@ -256,7 +263,7 @@ class AnalysisWorker:
             if response.status == AnalysisStatus.ERROR.value:
                 err_msg = response.error_message or "Неизвестная ошибка построения графа"
                 code = ErrorCode.GRAPH_BUILD_FAILED.value
-                if "Overpass" in err_msg or "зеркал" in err_msg or "OSM" in err_msg:
+                if "Overpass" in err_msg or "зеркал" in err_msg or "OSM" in err_msg or "оффлайн" in err_msg.lower():
                     code = ErrorCode.OSM_UNAVAILABLE.value
                 elif "валидации" in err_msg:
                     code = ErrorCode.INVALID_PARAMETERS.value
@@ -269,6 +276,7 @@ class AnalysisWorker:
             # Успешное построение графа — сериализуем в контракт Go и рассчитываем метрики
             from graph_service.application.graph_serializer import GraphSerializer
             from graph_service.application.metrics_service import GraphMetricsService
+            from graph_service.application.rail_metrics_service import RailMetricsService
 
             log_graph = response.graph_object
             if log_graph is None:
@@ -281,10 +289,20 @@ class AnalysisWorker:
 
             graph_payload = GraphSerializer.serialize(log_graph)
 
-            # Расчёт метрик Data Science (#28, #71)
+            # Расчёт метрик Data Science (#28, #71, Спринт 6)
             try:
-                routes_data = getattr(response, "routes", None)
-                metrics = GraphMetricsService.calculate_metrics(log_graph, routes=routes_data)
+                if transport_mode == TransportMode.RAIL.value:
+                    physical_g = getattr(response, "physical_graph", None) or log_graph.graph.get("physical_graph") or log_graph
+                    facs = getattr(response, "facilities", None) or log_graph.graph.get("facilities", [])
+                    metrics = RailMetricsService.calculate_metrics(
+                        graph=physical_g,
+                        facilities=facs,
+                        routing_graph=log_graph if log_graph.is_directed() else None,
+                    )
+                else:
+                    routes_data = getattr(response, "routes", None)
+                    metrics = GraphMetricsService.calculate_metrics(log_graph, routes=routes_data)
+
                 result_payload = ResultEventPayload(
                     status=TaskStatus.COMPLETED.value,
                     graph=graph_payload,

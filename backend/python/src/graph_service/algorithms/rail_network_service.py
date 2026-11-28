@@ -82,12 +82,13 @@ class RailNetworkService:
                     objs_data = json.load(f)
 
             ways_elements = ways_data.get("response", {}).get("elements", ways_data.get("elements", []))
+            objs_elements = objs_data.get("response", {}).get("elements", objs_data.get("elements", []))
             point_tags = {}
-            for el in objs_data.get("response", {}).get("elements", objs_data.get("elements", [])):
+            for el in objs_elements:
                 if el.get("type") == "node" and "tags" in el:
                     point_tags[el["id"]] = el["tags"]
 
-            return {"elements": ways_elements}, point_tags
+            return {"elements": ways_elements}, point_tags, objs_elements
 
         # 2. Локальный кэш
         if not refetch and os.path.exists(ways_cache_file) and os.path.exists(objs_cache_file):
@@ -98,12 +99,13 @@ class RailNetworkService:
                 objs_data = json.load(f)
 
             ways_elements = ways_data.get("response", {}).get("elements", ways_data.get("elements", []))
+            objs_elements = objs_data.get("response", {}).get("elements", objs_data.get("elements", []))
             point_tags = {}
-            for el in objs_data.get("response", {}).get("elements", objs_data.get("elements", [])):
+            for el in objs_elements:
                 if el.get("type") == "node" and "tags" in el:
                     point_tags[el["id"]] = el["tags"]
 
-            return {"elements": ways_elements}, point_tags
+            return {"elements": ways_elements}, point_tags, objs_elements
 
         # 3. Онлайн-запрос Overpass с ротацией зеркал
         print(f"[*] Запрос ЖД-сети Overpass для bbox: {bbox.to_dict()}...")
@@ -123,12 +125,13 @@ class RailNetworkService:
         with open(objs_cache_file, "w", encoding="utf-8") as f:
             json.dump({"bbox": bbox.to_dict(), "response": objs_raw}, f, ensure_ascii=False)
 
+        objs_elements = objs_raw.get("elements", [])
         point_tags = {}
-        for el in objs_raw.get("elements", []):
+        for el in objs_elements:
             if el.get("type") == "node" and "tags" in el:
                 point_tags[el["id"]] = el["tags"]
 
-        return {"elements": ways_raw.get("elements", [])}, point_tags
+        return {"elements": ways_raw.get("elements", [])}, point_tags, objs_elements
 
     def build_from_bbox(
         self,
@@ -147,7 +150,7 @@ class RailNetworkService:
         - G_geom: обрезанный геометрический граф до сжатия.
         - G_simple: сжатый граф с сохраненными параллельными путями и длинами.
         """
-        ways_dict, point_tags = self.fetch_data_from_bbox(bbox, refetch=refetch)
+        ways_dict, point_tags, _ = self.fetch_data_from_bbox(bbox, refetch=refetch)
         elements = ways_dict.get("elements", [])
 
         # Отбор целевых путей

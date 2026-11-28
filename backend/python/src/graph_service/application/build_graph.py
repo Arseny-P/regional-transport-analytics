@@ -13,6 +13,7 @@ from graph_service.domain.models import (
     TerritoryBounds,
     LogisticsNode,
     RouteStatus,
+    TransportMode,
 )
 from graph_service.config import config
 from graph_service.domain.errors import (
@@ -23,6 +24,8 @@ from graph_service.domain.errors import (
 from graph_service.algorithms.road_network_service import RoadNetworkService
 from graph_service.algorithms.facility_service import FacilityService
 from graph_service.algorithms.logistics_graph_service import LogisticsGraphService
+from graph_service.algorithms.rail_network_service import RailNetworkService
+from graph_service.algorithms.rail_facility_service import RailFacilityService
 from graph_service.application.cancellation import CancellationToken, TaskCancelledException
 
 
@@ -47,6 +50,9 @@ class TerritoryAnalysisService:
         """
         if cancellation_token:
             cancellation_token.check_cancelled()
+
+        if request.transport_mode == TransportMode.RAIL.value:
+            return self.run_rail_analysis(request, cancellation_token)
 
         start_time = time.time()
         warnings: List[str] = []
@@ -392,6 +398,176 @@ class TerritoryAnalysisService:
             geojson=geojson_payload,
             warnings=warnings,
             graph_object=route_road_graph,
+        )
+
+    def run_rail_analysis(
+        self,
+        request: AnalysisRequest,
+        cancellation_token: Optional[CancellationToken] = None,
+    ) -> AnalysisResponse:
+        """
+        Запускает полный цикл анализа железнодорожной сети территории.
+        Поддерживает кооперативную отмену через CancellationToken.
+        """
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
+        start_time = time.time()
+        warnings: List[str] = []
+        storage_dir = request.output_dir or self.default_storage_dir
+        os.makedirs(storage_dir, exist_ok=True)
+
+        rail_network_service = RailNetworkService(storage_dir=storage_dir)
+        rail_facility_service = RailFacilityService(storage_dir=storage_dir)
+
+        # 1. Валидация входных параметров территории
+        territory_meta: Dict[str, Any] = {"type": request.territory_type}
+
+        try:
+            if request.territory_type == TerritorySourceType.BBOX.value:
+                if request.bbox is None:
+                    raise TerritoryValidationError("Для territory_type='bbox' необходимо передать объект 'bbox'.")
+                request.bbox.validate()
+                territory_meta["bbox"] = request.bbox.to_dict()
+                alias_base = request.output_alias or request.bbox.cache_key()
+            else:
+                raise TerritoryValidationError(
+                    f"Для железнодорожного анализа поддерживается territory_type='bbox', получено '{request.territory_type}'."
+                )
+        except (TerritoryValidationError, ValueError) as val_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка валидации территории: {val_err}",
+                warnings=warnings,
+            )
+
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
+        # 2. Построение железнодорожной сети (Overpass / оффлайн-фикстуры)
+        try:
+            G_geom, G_simple = rail_network_service.build_from_bbox(
+                bbox=request.bbox,
+                refetch=request.refetch,
+            )
+        except OfflineDataNotFoundError as off_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка оффлайн-источника данных OSM: {off_err}",
+                warnings=warnings,
+            )
+        except Exception as osm_err:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message=f"Ошибка получения железнодорожной сети OSM: {osm_err}",
+                warnings=warnings,
+            )
+
+        if len(G_simple.nodes) == 0:
+            return AnalysisResponse(
+                status=AnalysisStatus.ERROR.value,
+                territory=territory_meta,
+                error_message="Построенный железнодорожный граф пуст. Проверьте границы территории.",
+                warnings=warnings,
+            )
+
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
+        # 3. Извлечение станций-кандидатов из загруженных элементов OSM
+        ways_dict, point_tags, objs_elements = rail_network_service.fetch_data_from_bbox(
+            bbox=request.bbox,
+            refetch=request.refetch,
+        )
+        candidates = rail_facility_service.extract_station_candidates(objs_elements)
+
+        # Привязка подтвержденных станций-якорей (если переданы в request.facilities)
+        anchors_map: Dict[str, List[str]] = {}
+        if request.facilities:
+            for fac_item in request.facilities:
+                fac_id = str(fac_item.get("id") or fac_item.get("facility_id") or "")
+                anc_list = fac_item.get("anchor_node_ids") or []
+                if fac_id and anc_list:
+                    anchors_map[fac_id] = [str(a) for a in anc_list]
+
+        facilities = rail_facility_service.bind_station_anchors(
+            facilities=candidates,
+            anchors_map=anchors_map,
+            graph=G_simple,
+        )
+
+        # 4. Построение направленного графа маршрутизации
+        routing_graph = rail_network_service.to_routing_graph(G_simple)
+        routing_graph.graph["transport_mode"] = "rail"
+        routing_graph.graph["physical_graph"] = G_simple
+        routing_graph.graph["facilities"] = facilities
+
+        G_simple.graph["transport_mode"] = "rail"
+        G_simple.graph["facilities"] = facilities
+
+        # Привязка станций в routing_graph при наличии якорей
+        if anchors_map:
+            rail_facility_service.bind_station_anchors(
+                facilities=facilities,
+                anchors_map=anchors_map,
+                graph=routing_graph,
+            )
+
+        if cancellation_token:
+            cancellation_token.check_cancelled()
+
+        # 5. Экспорт артефактов (если включено)
+        artifacts: Dict[str, Optional[str]] = {}
+        if request.save_artifacts:
+            rail_graphml_file = os.path.join(storage_dir, f"{alias_base}_rail_simple.graphml")
+            try:
+                nx.write_graphml(G_simple, rail_graphml_file)
+                artifacts["rail_graphml"] = rail_graphml_file
+            except Exception:
+                pass
+
+        elapsed = round(time.time() - start_time, 2)
+        connected_facs = rail_facility_service.get_connected_facilities(facilities)
+
+        summary_data = {
+            "total_rail_nodes": len(G_simple.nodes),
+            "total_physical_segments": len(G_simple.edges),
+            "total_directed_edges": len(routing_graph.edges),
+            "station_candidates_count": len(candidates),
+            "connected_stations_count": len(connected_facs),
+            "switch_count": len([n for n, d in G_simple.nodes(data=True) if d.get("is_switch")]),
+            "execution_time_sec": elapsed,
+        }
+
+        hubs_data: List[Dict[str, Any]] = [
+            {
+                "id": f.facility_id,
+                "name": f.name,
+                "latitude": f.latitude,
+                "longitude": f.longitude,
+                "anchor_node_ids": f.anchor_node_ids,
+                "connection_status": f.connection_status,
+                "cargo_status": f.cargo_status,
+            }
+            for f in facilities
+        ]
+
+        return AnalysisResponse(
+            status=AnalysisStatus.SUCCESS.value,
+            territory=territory_meta,
+            summary=summary_data,
+            artifacts=artifacts,
+            hubs=hubs_data,
+            connections=[],
+            routes=[],
+            geojson=None,
+            warnings=warnings,
+            graph_object=routing_graph,
+            facilities=facilities,
+            physical_graph=G_simple,
         )
 
 

@@ -433,6 +433,8 @@ class AnalysisResponse:
     warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
     graph_object: Optional[Any] = field(default=None, repr=False)
+    facilities: List[Any] = field(default_factory=list, repr=False)
+    physical_graph: Optional[Any] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {

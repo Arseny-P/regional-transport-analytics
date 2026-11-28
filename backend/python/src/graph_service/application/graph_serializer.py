@@ -181,13 +181,127 @@ class GraphSerializer:
         """
         Преобразует граф сети в GraphPayload:
         - Координаты вершин position: строго [lon, lat] с округлением до 6 знаков.
-        - Атрибуты вершин: object_type ("warehouse", "intersection", "road_node"), name, etc.
-        - Геометрия рёбер: [[lon, lat], ...] вдоль фактической геометрии дорожных сегментов/коннекторов.
-        - Атрибуты рёбер: edge_type ("road" / "access_connector"), length_m, routes_count, etc.
-        - segment_id: физический ID дорожного участка (одинаков для u->v и v->u).
+        - Атрибуты вершин: object_type ("warehouse", "intersection", "road_node", "rail_node", "rail_facility"), etc.
+        - Геометрия рёбер: [[lon, lat], ...] вдоль фактической геометрии сегментов.
+        - Атрибуты рёбер:
+          - road: edge_type ("road" / "access_connector"), length_m, routes_count, etc.
+          - rail: transport_mode="rail", length_m, (БЕЗ edge_type).
+        - segment_id: физический ID участка (одинаков для u->v и v->u).
         """
         nodes: List[NodePayload] = []
         edges: List[EdgePayload] = []
+
+        is_rail = False
+        if log_graph.graph.get("transport_mode") == "rail":
+            is_rail = True
+        else:
+            for _, d in log_graph.nodes(data=True):
+                if d.get("object_type") in {"rail_facility", "rail_node"} or "node_kind" in d:
+                    is_rail = True
+                    break
+
+        if is_rail:
+            # 1. Сериализация вершин ЖД
+            for node_id, data in log_graph.nodes(data=True):
+                lon = data.get("x") or data.get("lon") or data.get("longitude")
+                lat = data.get("y") or data.get("lat") or data.get("latitude")
+
+                if lon is None or lat is None:
+                    continue
+
+                node_attrs: Dict[str, Any] = {
+                    "transport_mode": "rail",
+                    "object_type": str(data.get("object_type", "rail_node")),
+                    "node_kind": str(data.get("node_kind", "intermediate")),
+                }
+                for opt_key in (
+                    "name",
+                    "is_switch",
+                    "has_buffer_stop",
+                    "is_boundary",
+                    "classification_basis",
+                    "facility_id",
+                    "facility_name",
+                    "connection_status",
+                    "cargo_status",
+                    "physical_degree",
+                    "source_osm_ids",
+                    "anchor_node_ids",
+                ):
+                    if opt_key in data and data[opt_key] is not None:
+                        node_attrs[opt_key] = data[opt_key]
+
+                nodes.append(
+                    NodePayload(
+                        id=str(node_id),
+                        position=[round(float(lon), 6), round(float(lat), 6)],
+                        attributes=node_attrs,
+                    )
+                )
+
+            # 2. Сериализация рёбер ЖД (без edge_type, с сохранением segment_id и геометрии)
+            edge_idx = 0
+            edges_iter = (
+                log_graph.edges(keys=True, data=True)
+                if log_graph.is_multigraph()
+                else ((u, v, 0, d) for u, v, d in log_graph.edges(data=True))
+            )
+            for u, v, k, data in edges_iter:
+                edge_idx += 1
+                edge_id = str(data.get("id") or f"rail_e_{u}_{v}_{k}_{edge_idx}")
+                segment_id = str(data.get("segment_id") or f"seg_{u}_{v}")
+
+                geom_coords: Optional[List[List[float]]] = None
+                raw_geom = data.get("geometry")
+                if raw_geom is not None and isinstance(raw_geom, (LineString, MultiLineString)):
+                    if isinstance(raw_geom, LineString):
+                        geom_coords = [[round(pt[0], 6), round(pt[1], 6)] for pt in raw_geom.coords]
+                    elif isinstance(raw_geom, MultiLineString):
+                        geom_coords = []
+                        for line in raw_geom.geoms:
+                            geom_coords.extend([[round(pt[0], 6), round(pt[1], 6)] for pt in line.coords])
+                else:
+                    wkt_str = data.get("geometry_wkt")
+                    if wkt_str:
+                        geom_coords = cls._parse_wkt_to_coords(wkt_str)
+
+                if not geom_coords or len(geom_coords) < 2:
+                    node_u_data = log_graph.nodes.get(u, {})
+                    node_v_data = log_graph.nodes.get(v, {})
+                    u_lon = node_u_data.get("x") or node_u_data.get("lon") or node_u_data.get("longitude")
+                    u_lat = node_u_data.get("y") or node_u_data.get("lat") or node_u_data.get("latitude")
+                    v_lon = node_v_data.get("x") or node_v_data.get("lon") or node_v_data.get("longitude")
+                    v_lat = node_v_data.get("y") or node_v_data.get("lat") or node_v_data.get("latitude")
+                    if u_lon is not None and u_lat is not None and v_lon is not None and v_lat is not None:
+                        geom_coords = [
+                            [round(float(u_lon), 6), round(float(u_lat), 6)],
+                            [round(float(v_lon), 6), round(float(v_lat), 6)],
+                        ]
+
+                edge_attrs: Dict[str, Any] = {
+                    "transport_mode": "rail",
+                }
+                if "length_m" in data and data["length_m"] is not None:
+                    try:
+                        edge_attrs["length_m"] = round(float(data["length_m"]), 2)
+                    except (ValueError, TypeError):
+                        pass
+                for opt_key in ("source_osm_ids", "source_segment_ids"):
+                    if opt_key in data and data[opt_key]:
+                        edge_attrs[opt_key] = data[opt_key]
+
+                edges.append(
+                    EdgePayload(
+                        id=edge_id,
+                        source=str(u),
+                        target=str(v),
+                        segment_id=segment_id,
+                        geometry=geom_coords,
+                        attributes=edge_attrs,
+                    )
+                )
+
+            return GraphPayload(nodes=nodes, edges=edges)
 
         # 0. Предварительно вычисляем сопоставление физических сегментов для дорожных рёбер
         seg_id_map = cls.compute_physical_segment_ids(log_graph)
