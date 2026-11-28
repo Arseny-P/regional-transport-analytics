@@ -54,7 +54,7 @@ class RailNetworkService:
 
     def fetch_data_from_bbox(
         self, bbox: TerritoryBounds, refetch: bool = False
-    ) -> Tuple[Dict[str, Any], Dict[int, Dict[str, Any]]]:
+    ) -> Tuple[Dict[str, Any], Dict[int, Dict[str, Any]], List[Dict[str, Any]]]:
         """
         Загружает данные путей и специальных узлов OSM для заданного BBox.
         Поддерживает оффлайн-режим (фикстуры) и кэширование на диск.
