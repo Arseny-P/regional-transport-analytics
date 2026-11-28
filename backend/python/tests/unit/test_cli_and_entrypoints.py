@@ -79,6 +79,19 @@ class TestCliAndEntrypoints(unittest.TestCase):
         self.assertEqual(res_fail_env.payload["status"], "failed")
         self.assertIsNotNone(res_fail_env.payload["error"]["code"])
 
+        # 5. RESULT multimodal completed
+        multi_file = os.path.join(data_dir, "example_kafka_result_multimodal_completed.json")
+        self.assertTrue(os.path.exists(multi_file))
+        with open(multi_file, "r", encoding="utf-8") as f:
+            multi_data = json.load(f)
+        multi_env = KafkaEnvelope.from_dict(multi_data)
+        self.assertEqual(multi_env.type, "RESULT")
+        self.assertEqual(multi_env.transport_type, "road,rail")
+        self.assertEqual(multi_env.payload["status"], "completed")
+        self.assertGreater(len(multi_env.payload["graph"]["nodes"]), 0)
+        self.assertGreater(len(multi_env.payload["graph"]["edges"]), 0)
+        self.assertGreater(len(multi_env.payload["metrics"]), 0)
+
     def test_dunder_main_module_importable(self):
         import graph_service.__main__
         self.assertIsNotNone(graph_service.__main__.run_worker_cli)

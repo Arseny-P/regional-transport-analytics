@@ -15,6 +15,7 @@ from graph_service.domain import (
     TerritorySourceType,
     FacilitySourceType,
     AnalysisStatus,
+    TransportMode,
 )
 from graph_service.application import TerritoryAnalysisService
 
@@ -44,6 +45,17 @@ def parse_args():
         "--shushary-district",
         action="store_true",
         help="Демонстрационный запуск для логистического кластера Шушары (СПб)",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=["road", "rail"],
+        default="road",
+        help="Вид транспорта: 'road' (автодороги) или 'rail' (железные дороги)",
+    )
+    parser.add_argument(
+        "--rail",
+        action="store_true",
+        help="Флаг для анализа железнодорожной сети (эквивалентно --transport rail)",
     )
 
     # 2. Логистические объекты
@@ -151,6 +163,8 @@ def main():
             req_data = json.load(f)
 
         request = AnalysisRequest.from_dict(req_data)
+        if args.rail or args.transport == "rail":
+            request.transport_mode = TransportMode.RAIL.value
         if args.refetch:
             request.refetch = True
         if args.knn is not None:
@@ -169,6 +183,7 @@ def main():
         sys.exit(0 if response.status == AnalysisStatus.SUCCESS.value else 1)
 
     # СЦЕНАРИЙ Б: Интерактивный запуск через аргументы командной строки
+    transport_mode = TransportMode.RAIL.value if args.rail or args.transport == "rail" else TransportMode.ROAD.value
     territory_type = TerritorySourceType.PLACE_NAME.value
     bbox_obj: Optional[TerritoryBounds] = None
     place_name: Optional[str] = None
@@ -188,12 +203,18 @@ def main():
         output_alias = bbox_obj.cache_key()
         area_title = f"BBox (lat: [{bbox_obj.min_lat}, {bbox_obj.max_lat}], lon: [{bbox_obj.min_lon}, {bbox_obj.max_lon}])"
     elif args.shushary:
-        territory_type = TerritorySourceType.PLACE_NAME.value
-        place_name = "Шушары, Санкт-Петербург, Россия"
-        which_result = 3
-        output_alias = "shushary"
-        seed_points_file = "test_shushary_points.json"
-        area_title = place_name
+        if transport_mode == TransportMode.RAIL.value:
+            territory_type = TerritorySourceType.BBOX.value
+            bbox_obj = TerritoryBounds(min_lat=59.795, min_lon=30.385, max_lat=59.824, max_lon=30.441)
+            output_alias = "shushary_rail"
+            area_title = "Шушары (ЖД полигон BBox: [30.385, 59.795, 30.441, 59.824])"
+        else:
+            territory_type = TerritorySourceType.PLACE_NAME.value
+            place_name = "Шушары, Санкт-Петербург, Россия"
+            which_result = 3
+            output_alias = "shushary"
+            seed_points_file = "test_shushary_points.json"
+            area_title = place_name
     elif args.place_name:
         territory_type = TerritorySourceType.PLACE_NAME.value
         place_name = args.place_name
@@ -209,11 +230,12 @@ def main():
         area_title = place_name
 
     print(f"Целевая территория: {area_title}")
+    print(f"Вид транспорта: {transport_mode.upper()}")
 
     # Загрузка объектов
     user_facilities: List[Dict[str, Any]] = []
     facilities_path = args.facilities_file
-    if not facilities_path and seed_points_file:
+    if not facilities_path and seed_points_file and transport_mode == TransportMode.ROAD.value:
         facilities_path = os.path.join(args.data_dir, seed_points_file)
 
     if facilities_path and os.path.exists(facilities_path):
@@ -222,7 +244,7 @@ def main():
             user_facilities = json.load(f)
 
     if args.osm_pois or (not user_facilities):
-        if not user_facilities:
+        if not user_facilities and transport_mode == TransportMode.ROAD.value:
             print("[*] Пользовательский файл объектов не передан: активирован автоматический поиск объектов в OpenStreetMap.")
         facility_source = FacilitySourceType.HYBRID.value if user_facilities else FacilitySourceType.OSM.value
     else:
@@ -239,6 +261,7 @@ def main():
         osm_facilities_limit=args.osm_limit,
         max_snap_distance_m=args.max_snap_distance,
         knn=args.knn,
+        transport_mode=transport_mode,
         output_dir=args.data_dir,
         output_alias=output_alias,
         save_artifacts=True,
@@ -266,11 +289,51 @@ def print_response_summary(response: AnalysisResponse):
 
     summary = response.summary
     if summary:
-        print(f"• Дорожная сеть: {summary.get('total_road_nodes', 0)} узлов, {summary.get('total_road_edges', 0)} ребер")
-        print(f"• Логистических хабов: {summary.get('total_hubs', 0)} (изолированных: {summary.get('isolated_hubs_count', 0)})")
-        print(f"• Построено связей: {summary.get('total_connections', 0)} (связанных пар: {summary.get('connected_pairs_count', 0)})")
-        print(f"• Средняя протяженность маршрута: {summary.get('avg_route_distance_km', 0.0)} км")
-        print(f"• Время выполнения анализа: {summary.get('execution_time_sec', 0.0)} сек.")
+        if "total_rail_nodes" in summary:
+            print(f"• Железнодорожная сеть: {summary.get('total_rail_nodes', 0)} узлов, {summary.get('total_physical_segments', 0)} физических путей ({summary.get('total_directed_edges', 0)} направленных дуг)")
+            print(f"• Стрелочных переводов (switch): {summary.get('switch_count', 0)}")
+            print(f"• Станций-кандидатов в регионе: {summary.get('station_candidates_count', 0)} (подключено: {summary.get('connected_stations_count', 0)})")
+            print(f"• Время выполнения анализа: {summary.get('execution_time_sec', 0.0)} сек.")
+
+            # Расчет и вывод метрик Sprint 6
+            if response.physical_graph and response.graph_object:
+                from graph_service.application.rail_metrics_service import RailMetricsService
+                try:
+                    metrics = RailMetricsService.calculate_metrics(
+                        graph=response.physical_graph,
+                        facilities=response.facilities,
+                        routing_graph=response.graph_object,
+                    )
+                    print("\nРассчитанные метрики (Sprint 6 MVP):")
+                    for m in metrics:
+                        if m.node_id is None:
+                            print(f"  • {m.name}: {m.value}")
+                    st_metrics = [m for m in metrics if m.name == "nearest_station_distance_m"]
+                    if st_metrics:
+                        print(f"  • Расстояния до ближайших станций (найдено: {len(st_metrics)}):")
+                        for sm in st_metrics:
+                            print(f"      - станция {sm.node_id}: {sm.value:.1f} м")
+                    sw_metrics = [m for m in metrics if m.name == "betweenness_centrality"]
+                    if sw_metrics:
+                        print(f"  • betweenness_centrality стрелок (всего стрелок: {len(sw_metrics)}):")
+                        for sm in sw_metrics[:5]:
+                            print(f"      - стрелка {sm.node_id}: {sm.value:.6f}")
+                        if len(sw_metrics) > 5:
+                            print(f"      ... и ещё {len(sw_metrics) - 5} стрелок")
+                except Exception as m_err:
+                    print(f"  [!] Ошибка расчёта ЖД-метрик: {m_err}")
+        else:
+            print(f"• Дорожная сеть: {summary.get('total_road_nodes', 0)} узлов, {summary.get('total_road_edges', 0)} ребер")
+            print(f"• Логистических хабов: {summary.get('total_hubs', 0)} (изолированных: {summary.get('isolated_hubs_count', 0)})")
+            print(f"• Построено связей: {summary.get('total_connections', 0)} (связанных пар: {summary.get('connected_pairs_count', 0)})")
+            print(f"• Средняя протяженность маршрута: {summary.get('avg_route_distance_km', 0.0)} км")
+            print(f"• Время выполнения анализа: {summary.get('execution_time_sec', 0.0)} сек.")
+
+    if response.hubs and summary and "total_rail_nodes" in summary:
+        print("\nОбнаруженные железнодорожные станции:")
+        for h in response.hubs[:5]:
+            anchors_str = f"якоря: {h.get('anchor_node_ids')}" if h.get('anchor_node_ids') else "нет подтверждённых якорей"
+            print(f"  • {h.get('name')} [{h.get('id')}]: статус '{h.get('connection_status')}', {anchors_str}")
 
     if response.artifacts:
         print("\nСозданные артефакты:")

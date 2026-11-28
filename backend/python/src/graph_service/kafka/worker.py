@@ -9,6 +9,7 @@ from graph_service.domain.models import (
     TerritoryBounds,
     TerritorySourceType,
     FacilitySourceType,
+    TransportMode,
 )
 from graph_service.domain.errors import (
     GraphServiceError,
@@ -148,6 +149,8 @@ class AnalysisWorker:
                 await self.transport.commit(ctx)
             return
 
+        initial_transport = start_payload.get_transport_type()
+
         try:
             start_payload.validate_transports()
         except ValueError as trans_err:
@@ -156,6 +159,7 @@ class AnalysisWorker:
                 job_id=job_id,
                 code=ErrorCode.UNSUPPORTED_TRANSPORT.value,
                 message=str(trans_err),
+                transport_type=initial_transport,
             )
             if ctx is not None:
                 await self.transport.commit(ctx)
@@ -166,13 +170,21 @@ class AnalysisWorker:
         self._active_tokens[job_id] = token
         self.repository.mark_message_processed(message_id, job_id)
 
-        # 5. Отправка промежуточного статуса running.
-        # Ошибка отправки промежуточного статуса не должна срывать запуск вычислений (Issue 2).
-        try:
-            await self._emit_status(job_id=job_id, status=TaskStatus.RUNNING.value)
-            self.repository.save_job_state(job_id, status=TaskStatus.RUNNING.value)
-        except Exception as status_err:
-            print(f"[!] Предупреждение: не удалось отправить статус RUNNING для {job_id}: {status_err}")
+        # 5. Отправка промежуточного статуса running для каждого запрошенного вида транспорта.
+        for t in start_payload.transports:
+            try:
+                await self._emit_status(
+                    job_id=job_id,
+                    status=TaskStatus.RUNNING.value,
+                    transport_type=t,
+                )
+                self.repository.save_job_state(
+                    job_id,
+                    status=TaskStatus.RUNNING.value,
+                    transport_type=t,
+                )
+            except Exception as status_err:
+                print(f"[!] Предупреждение: не удалось отправить статус RUNNING для {job_id} ({t}): {status_err}")
 
         # 6. Запуск вычислений в фоновом режиме с передачей ctx для Manual Commit после завершения (Issue 1)
         task = asyncio.create_task(
@@ -188,6 +200,9 @@ class AnalysisWorker:
     async def _handle_cancel(self, envelope: KafkaEnvelope, ctx: Optional[Any] = None) -> None:
         """
         Обрабатывает команду отмены вычислений CANCEL.
+        Если задача ещё выполняется — посылает сигнал отмены в токен.
+        Если задача уже завершилась или не активна — переводит её в canceled и подтверждает событием,
+        чтобы в Go-оркестраторе не зависал статус cancel_requested.
         """
         job_id = envelope.job_id
         print(f"[*] Получен запрос на отмену (CANCEL) для задачи {job_id}")
@@ -198,45 +213,73 @@ class AnalysisWorker:
             token.cancel()
             print(f"[+] Сигнал отмены передан в вычислительный процесс задачи {job_id}")
         else:
-            # Задача уже не выполняется или была завершена ранее
+            # Задача уже не выполняется в памяти (завершена ранее или еще не стартовала)
             state = self.repository.get_job_state(job_id)
-            if state and state.get("status") in (TaskStatus.COMPLETED.value, TaskStatus.FAILED.value):
-                print(f"[*] Задача {job_id} уже завершена со статусом {state.get('status')}. Отмена не требуется.")
+            prev_status = state.get("status") if state else None
+            known_transports = list((state.get("transports") or {}).keys()) if state else []
+            if envelope.transport_type:
+                transports_to_cancel = [envelope.transport_type]
+            elif known_transports:
+                transports_to_cancel = known_transports
             else:
-                # Если задача еще не стартовала, подтверждаем отмену
-                await self._emit_status(job_id=job_id, status=TaskStatus.CANCELED.value)
-                self.repository.save_job_state(job_id=job_id, status=TaskStatus.CANCELED.value)
+                transports_to_cancel = [state.get("transport_type") or "road"] if state else ["road"]
+
+            print(
+                f"[*] Задача {job_id} не активна в памяти (статус: '{prev_status}'). "
+                f"Применяем отмену по запросу Go-сервиса для транспортов: {transports_to_cancel}."
+            )
+            for t in transports_to_cancel:
+                await self._emit_status(
+                    job_id=job_id,
+                    status=TaskStatus.CANCELED.value,
+                    transport_type=t,
+                )
+                self.repository.save_job_state(
+                    job_id=job_id,
+                    status=TaskStatus.CANCELED.value,
+                    transport_type=t,
+                )
 
         # Команда отмены обработана — подтверждаем её оффсет
         if ctx is not None:
             await self.transport.commit(ctx)
 
-    async def _run_analysis_pipeline(
+    async def _run_single_transport_pipeline(
         self,
         job_id: str,
+        transport: str,
         payload: StartCommandPayload,
         token: CancellationToken,
-        ctx: Optional[Any] = None,
     ) -> None:
         """
-        Фоновый цикл выполнения построения графа, расчета метрик и публикации RESULT.
-        Подтверждает оффсет сообщения (Manual Commit) строго после публикации финального результата.
+        Выполняет построение графа и расчет метрик для одного конкретного вида транспорта ('road' или 'rail').
+        Сразу по завершении публикует RESULT для этого транспорта, не дожидаясь остальных.
         """
-        try:
-            west, south, east, north = payload.area.to_bounds()
-            bbox = TerritoryBounds(
-                min_lat=south,
-                min_lon=west,
-                max_lat=north,
-                max_lon=east,
-            )
+        west, south, east, north = payload.area.to_bounds()
+        bbox = TerritoryBounds(
+            min_lat=south,
+            min_lon=west,
+            max_lat=north,
+            max_lon=east,
+        )
 
+        try:
+            if token.is_cancelled:
+                raise TaskCancelledException(f"Построение графа {transport} отменено")
+
+            from graph_service.application.graph_serializer import GraphSerializer
+            from graph_service.application.metrics_service import GraphMetricsService
+            from graph_service.application.rail_metrics_service import RailMetricsService
+
+            transport_mode = TransportMode.RAIL.value if transport == "rail" else TransportMode.ROAD.value
             request = AnalysisRequest(
                 territory_type=TerritorySourceType.BBOX.value,
                 bbox=bbox,
-                facility_source=FacilitySourceType.OSM.value,
+                facilities=payload.facilities or [],
+                facility_source=FacilitySourceType.HYBRID.value if payload.facilities else FacilitySourceType.OSM.value,
                 osm_facilities_limit=100,
                 knn=None,
+                transport_mode=transport_mode,
                 save_artifacts=True,
                 include_geojson_payload=False,
                 refetch=False,
@@ -250,56 +293,69 @@ class AnalysisWorker:
             )
 
             if token.is_cancelled:
-                raise TaskCancelledException("Задача была отменена во время выполнения")
+                raise TaskCancelledException(f"Построение графа {transport} отменено")
 
-            # Проверка статуса ответа сервиса
             if response.status == AnalysisStatus.ERROR.value:
-                err_msg = response.error_message or "Неизвестная ошибка построения графа"
+                err_msg = response.error_message or f"Ошибка построения графа {transport}"
                 code = ErrorCode.GRAPH_BUILD_FAILED.value
-                if "Overpass" in err_msg or "зеркал" in err_msg or "OSM" in err_msg:
+                if "Overpass" in err_msg or "зеркал" in err_msg or "OSM" in err_msg or "оффлайн" in err_msg.lower():
                     code = ErrorCode.OSM_UNAVAILABLE.value
                 elif "валидации" in err_msg:
                     code = ErrorCode.INVALID_PARAMETERS.value
 
-                await self._emit_failed_result(job_id=job_id, code=code, message=err_msg)
-                if ctx is not None:
-                    await self.transport.commit(ctx)
+                await self._emit_failed_result(
+                    job_id=job_id,
+                    code=code,
+                    message=err_msg,
+                    transport_type=transport,
+                )
                 return
-
-            # Успешное построение графа — сериализуем в контракт Go и рассчитываем метрики
-            from graph_service.application.graph_serializer import GraphSerializer
-            from graph_service.application.metrics_service import GraphMetricsService
 
             log_graph = response.graph_object
             if log_graph is None:
-                # Fallback, если объект графа не был передан в памяти
                 alias = bbox.cache_key()
                 try:
                     log_graph = self.analysis_service.logistics_service.load_graphml(filename=f"{alias}_route_roads")
                 except Exception:
                     log_graph = self.analysis_service.logistics_service.load_graphml(filename=f"{alias}_logistics")
 
-            graph_payload = GraphSerializer.serialize(log_graph)
+            rail_facs = (
+                (getattr(response, "facilities", None) or log_graph.graph.get("facilities", []))
+                if transport == "rail"
+                else None
+            )
+            graph_payload = GraphSerializer.serialize(log_graph, facilities=rail_facs)
 
-            # Расчёт метрик Data Science (#28, #71)
             try:
-                routes_data = getattr(response, "routes", None)
-                metrics = GraphMetricsService.calculate_metrics(log_graph, routes=routes_data)
+                if transport == "rail":
+                    physical_g = (
+                        getattr(response, "physical_graph", None)
+                        or log_graph.graph.get("physical_graph")
+                        or log_graph
+                    )
+                    metrics = RailMetricsService.calculate_metrics(
+                        graph=physical_g,
+                        facilities=rail_facs,
+                        routing_graph=log_graph if log_graph.is_directed() else None,
+                    )
+                else:
+                    routes_data = getattr(response, "routes", None)
+                    metrics = GraphMetricsService.calculate_metrics(log_graph, routes=routes_data)
+
                 result_payload = ResultEventPayload(
                     status=TaskStatus.COMPLETED.value,
                     graph=graph_payload,
                     metrics=metrics,
                 )
             except Exception as metrics_err:
-                # Если упали метрики, готовый граф НЕ уничтожается по контракту (п. 7)
-                print(f"[-] Сбой расчёта метрик для задачи {job_id}: {metrics_err}")
+                print(f"[-] Сбой расчёта метрик ({transport}) для задачи {job_id}: {metrics_err}")
                 result_payload = ResultEventPayload(
                     status=TaskStatus.FAILED.value,
                     graph=graph_payload,
                     metrics=[],
                     error=ErrorPayload(
                         code=ErrorCode.METRICS_CALCULATION_FAILED.value,
-                        message=f"Не удалось рассчитать метрики: {metrics_err}",
+                        message=f"Не удалось рассчитать метрики ({transport}): {metrics_err}",
                     ),
                 )
 
@@ -307,33 +363,66 @@ class AnalysisWorker:
                 job_id=job_id,
                 msg_type=EventType.RESULT.value,
                 payload=result_payload.to_dict(),
+                transport_type=transport,
             )
             await self.producer.send_event(result_envelope)
             self.repository.save_job_state(
                 job_id=job_id,
                 status=result_payload.status,
                 result_envelope=result_envelope.to_dict(),
+                transport_type=transport,
             )
-            print(f"[+] Задача {job_id} успешно завершена со статусом {result_payload.status}.")
-
-            # Manual Commit оффсета только после успешной отправки результата (Issue 1)
-            if ctx is not None:
-                await self.transport.commit(ctx)
+            print(f"[+] Задача {job_id} ({transport}): отправлен RESULT со статусом {result_payload.status}.")
 
         except TaskCancelledException:
-            print(f"[*] Выполнение задачи {job_id} остановлено по сигналу отмены.")
-            await self._emit_status(job_id=job_id, status=TaskStatus.CANCELED.value)
-            self.repository.save_job_state(job_id=job_id, status=TaskStatus.CANCELED.value)
-            if ctx is not None:
-                await self.transport.commit(ctx)
+            print(f"[*] Вычисление {transport} для задачи {job_id} остановлено по отмене.")
+            await self._emit_status(
+                job_id=job_id,
+                status=TaskStatus.CANCELED.value,
+                transport_type=transport,
+            )
+            self.repository.save_job_state(
+                job_id=job_id,
+                status=TaskStatus.CANCELED.value,
+                transport_type=transport,
+            )
 
         except Exception as unhandled_err:
-            print(f"[-] Непредвиденная ошибка в задаче {job_id}: {unhandled_err}", file=sys.stderr)
+            print(f"[-] Непредвиденная ошибка в подзадаче {transport} для {job_id}: {unhandled_err}", file=sys.stderr)
             await self._emit_failed_result(
                 job_id=job_id,
                 code=ErrorCode.INTERNAL_ERROR.value,
-                message=f"Внутренняя ошибка сервиса: {unhandled_err}",
+                message=f"Внутренняя ошибка сервиса ({transport}): {unhandled_err}",
+                transport_type=transport,
             )
+
+    async def _run_analysis_pipeline(
+        self,
+        job_id: str,
+        payload: StartCommandPayload,
+        token: CancellationToken,
+        ctx: Optional[Any] = None,
+    ) -> None:
+        """
+        Координирует параллельный запуск анализа по каждому запрошенному виду транспорта.
+        Результат каждого транспорта отправляется мгновенно по мере готовности в отдельном RESULT.
+        Оффсет сообщения START коммитится строго после завершения всех запрошенных транспортов.
+        """
+        try:
+            tasks = [
+                asyncio.create_task(
+                    self._run_single_transport_pipeline(
+                        job_id=job_id,
+                        transport=t,
+                        payload=payload,
+                        token=token,
+                    )
+                )
+                for t in payload.transports
+            ]
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+            # Manual Commit оффсета только после завершения всех транспортов (Issue 1)
             if ctx is not None:
                 await self.transport.commit(ctx)
 
@@ -341,7 +430,12 @@ class AnalysisWorker:
             self._active_tokens.pop(job_id, None)
             self._active_tasks.pop(job_id, None)
 
-    async def _emit_status(self, job_id: str, status: str) -> None:
+    async def _emit_status(
+        self,
+        job_id: str,
+        status: str,
+        transport_type: Optional[str] = None,
+    ) -> None:
         """
         Отправляет событие STATUS в топик analysis.results.
         """
@@ -350,10 +444,17 @@ class AnalysisWorker:
             job_id=job_id,
             msg_type=EventType.STATUS.value,
             payload=payload,
+            transport_type=transport_type,
         )
         await self.producer.send_event(envelope)
 
-    async def _emit_failed_result(self, job_id: str, code: str, message: str) -> None:
+    async def _emit_failed_result(
+        self,
+        job_id: str,
+        code: str,
+        message: str,
+        transport_type: Optional[str] = None,
+    ) -> None:
         """
         Отправляет событие RESULT failed в топик analysis.results.
         """
@@ -367,6 +468,7 @@ class AnalysisWorker:
             job_id=job_id,
             msg_type=EventType.RESULT.value,
             payload=payload,
+            transport_type=transport_type,
         )
         await self.producer.send_event(envelope)
         self.repository.save_job_state(
@@ -374,6 +476,7 @@ class AnalysisWorker:
             status=TaskStatus.FAILED.value,
             result_envelope=envelope.to_dict(),
             error=message,
+            transport_type=transport_type,
         )
 
 

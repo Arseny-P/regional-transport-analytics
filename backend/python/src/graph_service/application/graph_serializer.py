@@ -177,17 +177,184 @@ class GraphSerializer:
         return edge_to_seg
 
     @classmethod
-    def serialize(cls, log_graph: Union[nx.MultiGraph, nx.MultiDiGraph, nx.Graph]) -> GraphPayload:
+    def serialize(
+        cls,
+        log_graph: Union[nx.MultiGraph, nx.MultiDiGraph, nx.Graph],
+        facilities: Optional[List[Any]] = None,
+    ) -> GraphPayload:
         """
         Преобразует граф сети в GraphPayload:
         - Координаты вершин position: строго [lon, lat] с округлением до 6 знаков.
-        - Атрибуты вершин: object_type ("warehouse", "intersection", "road_node"), name, etc.
-        - Геометрия рёбер: [[lon, lat], ...] вдоль фактической геометрии дорожных сегментов/коннекторов.
-        - Атрибуты рёбер: edge_type ("road" / "access_connector"), length_m, routes_count, etc.
-        - segment_id: физический ID дорожного участка (одинаков для u->v и v->u).
+        - Атрибуты вершин: object_type ("warehouse", "intersection", "road_node", "rail_node", "rail_facility"), etc.
+        - Геометрия рёбер: [[lon, lat], ...] вдоль фактической геометрии сегментов.
+        - Атрибуты рёбер:
+          - road: edge_type ("road" / "access_connector"), length_m, routes_count, etc.
+          - rail: transport_mode="rail", length_m, (БЕЗ edge_type).
+        - segment_id: физический ID участка (одинаков для u->v и v->u).
         """
         nodes: List[NodePayload] = []
         edges: List[EdgePayload] = []
+
+        is_rail = False
+        if log_graph.graph.get("transport_mode") == "rail":
+            is_rail = True
+        else:
+            for _, d in log_graph.nodes(data=True):
+                if d.get("object_type") in {"rail_facility", "rail_node"} or "node_kind" in d:
+                    is_rail = True
+                    break
+
+        if is_rail:
+            # 1. Сериализация вершин ЖД
+            existing_node_ids = set()
+            for node_id, data in log_graph.nodes(data=True):
+                lon = data.get("x") or data.get("lon") or data.get("longitude")
+                lat = data.get("y") or data.get("lat") or data.get("latitude")
+
+                if lon is None or lat is None:
+                    continue
+
+                node_attrs: Dict[str, Any] = {
+                    "transport_mode": "rail",
+                    "object_type": str(data.get("object_type", "rail_node")),
+                    "node_kind": str(data.get("node_kind", "intermediate")),
+                }
+                for opt_key in (
+                    "name",
+                    "is_switch",
+                    "has_buffer_stop",
+                    "is_boundary",
+                    "classification_basis",
+                    "facility_id",
+                    "facility_name",
+                    "connection_status",
+                    "cargo_status",
+                    "physical_degree",
+                    "source_osm_ids",
+                    "anchor_node_ids",
+                ):
+                    if opt_key in data and data[opt_key] is not None:
+                        node_attrs[opt_key] = data[opt_key]
+
+                existing_node_ids.add(str(node_id))
+                nodes.append(
+                    NodePayload(
+                        id=str(node_id),
+                        position=[round(float(lon), 6), round(float(lat), 6)],
+                        attributes=node_attrs,
+                    )
+                )
+
+            # Включение логических вершин станций (rail_facility) в graph.nodes
+            # для полного соответствия OpenAPI (node_id метрики станции указывает на существующую вершину)
+            facs_list = facilities if facilities is not None else log_graph.graph.get("facilities", [])
+            for fac in facs_list:
+                fac_id = (
+                    getattr(fac, "facility_id", None)
+                    or (fac.get("facility_id") if isinstance(fac, dict) else None)
+                    or (fac.get("id") if isinstance(fac, dict) else None)
+                )
+                if not fac_id or str(fac_id) in existing_node_ids:
+                    continue
+
+                fac_name = getattr(fac, "name", "") or (fac.get("name", "") if isinstance(fac, dict) else "")
+                fac_lat = getattr(fac, "latitude", None) or (fac.get("latitude") if isinstance(fac, dict) else (fac.get("lat") if isinstance(fac, dict) else None))
+                fac_lon = getattr(fac, "longitude", None) or (fac.get("longitude") if isinstance(fac, dict) else (fac.get("lon") if isinstance(fac, dict) else None))
+
+                if fac_lon is None or fac_lat is None:
+                    continue
+
+                fac_anchors = getattr(fac, "anchor_node_ids", []) or (fac.get("anchor_node_ids", []) if isinstance(fac, dict) else [])
+                fac_conn = getattr(fac, "connection_status", "not_checked") or (fac.get("connection_status", "not_checked") if isinstance(fac, dict) else "not_checked")
+                fac_cargo = getattr(fac, "cargo_status", "unknown") or (fac.get("cargo_status", "unknown") if isinstance(fac, dict) else "unknown")
+                fac_osm_ids = getattr(fac, "source_osm_ids", []) or (fac.get("source_osm_ids", []) if isinstance(fac, dict) else [])
+
+                station_attrs: Dict[str, Any] = {
+                    "transport_mode": "rail",
+                    "object_type": "rail_facility",
+                    "node_kind": "station",
+                    "name": fac_name,
+                    "facility_id": str(fac_id),
+                    "facility_name": fac_name,
+                    "connection_status": str(fac_conn),
+                    "cargo_status": str(fac_cargo),
+                    "anchor_node_ids": [str(a) for a in fac_anchors],
+                }
+                if fac_osm_ids:
+                    station_attrs["source_osm_ids"] = fac_osm_ids
+
+                existing_node_ids.add(str(fac_id))
+                nodes.append(
+                    NodePayload(
+                        id=str(fac_id),
+                        position=[round(float(fac_lon), 6), round(float(fac_lat), 6)],
+                        attributes=station_attrs,
+                    )
+                )
+
+            # 2. Сериализация рёбер ЖД (без edge_type, с сохранением segment_id и геометрии)
+            edge_idx = 0
+            edges_iter = (
+                log_graph.edges(keys=True, data=True)
+                if log_graph.is_multigraph()
+                else ((u, v, 0, d) for u, v, d in log_graph.edges(data=True))
+            )
+            for u, v, k, data in edges_iter:
+                edge_idx += 1
+                edge_id = str(data.get("id") or f"rail_e_{u}_{v}_{k}_{edge_idx}")
+                segment_id = str(data.get("segment_id") or f"seg_{u}_{v}")
+
+                geom_coords: Optional[List[List[float]]] = None
+                raw_geom = data.get("geometry")
+                if raw_geom is not None and isinstance(raw_geom, (LineString, MultiLineString)):
+                    if isinstance(raw_geom, LineString):
+                        geom_coords = [[round(pt[0], 6), round(pt[1], 6)] for pt in raw_geom.coords]
+                    elif isinstance(raw_geom, MultiLineString):
+                        geom_coords = []
+                        for line in raw_geom.geoms:
+                            geom_coords.extend([[round(pt[0], 6), round(pt[1], 6)] for pt in line.coords])
+                else:
+                    wkt_str = data.get("geometry_wkt")
+                    if wkt_str:
+                        geom_coords = cls._parse_wkt_to_coords(wkt_str)
+
+                if not geom_coords or len(geom_coords) < 2:
+                    node_u_data = log_graph.nodes.get(u, {})
+                    node_v_data = log_graph.nodes.get(v, {})
+                    u_lon = node_u_data.get("x") or node_u_data.get("lon") or node_u_data.get("longitude")
+                    u_lat = node_u_data.get("y") or node_u_data.get("lat") or node_u_data.get("latitude")
+                    v_lon = node_v_data.get("x") or node_v_data.get("lon") or node_v_data.get("longitude")
+                    v_lat = node_v_data.get("y") or node_v_data.get("lat") or node_v_data.get("latitude")
+                    if u_lon is not None and u_lat is not None and v_lon is not None and v_lat is not None:
+                        geom_coords = [
+                            [round(float(u_lon), 6), round(float(u_lat), 6)],
+                            [round(float(v_lon), 6), round(float(v_lat), 6)],
+                        ]
+
+                edge_attrs: Dict[str, Any] = {
+                    "transport_mode": "rail",
+                }
+                if "length_m" in data and data["length_m"] is not None:
+                    try:
+                        edge_attrs["length_m"] = round(float(data["length_m"]), 2)
+                    except (ValueError, TypeError):
+                        pass
+                for opt_key in ("source_osm_ids", "source_segment_ids"):
+                    if opt_key in data and data[opt_key]:
+                        edge_attrs[opt_key] = data[opt_key]
+
+                edges.append(
+                    EdgePayload(
+                        id=edge_id,
+                        source=str(u),
+                        target=str(v),
+                        segment_id=segment_id,
+                        geometry=geom_coords,
+                        attributes=edge_attrs,
+                    )
+                )
+
+            return GraphPayload(nodes=nodes, edges=edges)
 
         # 0. Предварительно вычисляем сопоставление физических сегментов для дорожных рёбер
         seg_id_map = cls.compute_physical_segment_ids(log_graph)
@@ -344,4 +511,82 @@ class GraphSerializer:
             return coords if len(coords) >= 2 else None
         except Exception:
             return None
+
+    @classmethod
+    def merge(cls, road_payload: GraphPayload, rail_payload: GraphPayload) -> GraphPayload:
+        """
+        Объединяет дорожный и железнодорожный графы в единый мультимодальный GraphPayload.
+        Гарантирует уникальность ID узлов и рёбер, сохраняет топологическую изоляцию сетей.
+        Каждая вершина и ребро получают атрибут transport ('road' или 'rail').
+        """
+        seen_nodes: Set[str] = set()
+        merged_nodes: List[NodePayload] = []
+
+        for node in road_payload.nodes:
+            if node.id not in seen_nodes:
+                seen_nodes.add(node.id)
+                attrs = dict(node.attributes or {})
+                if "transport" not in attrs:
+                    attrs["transport"] = "road"
+                merged_nodes.append(
+                    NodePayload(
+                        id=node.id,
+                        position=node.position,
+                        attributes=attrs,
+                    )
+                )
+
+        for node in rail_payload.nodes:
+            if node.id not in seen_nodes:
+                seen_nodes.add(node.id)
+                attrs = dict(node.attributes or {})
+                if "transport" not in attrs:
+                    attrs["transport"] = "rail"
+                merged_nodes.append(
+                    NodePayload(
+                        id=node.id,
+                        position=node.position,
+                        attributes=attrs,
+                    )
+                )
+
+        seen_edges: Set[str] = set()
+        merged_edges: List[EdgePayload] = []
+
+        for edge in road_payload.edges:
+            seen_edges.add(edge.id)
+            attrs = dict(edge.attributes or {})
+            if "transport" not in attrs:
+                attrs["transport"] = "road"
+            merged_edges.append(
+                EdgePayload(
+                    id=edge.id,
+                    source=edge.source,
+                    target=edge.target,
+                    segment_id=edge.segment_id,
+                    geometry=edge.geometry,
+                    attributes=attrs,
+                )
+            )
+
+        for edge in rail_payload.edges:
+            eid = edge.id
+            if eid in seen_edges:
+                eid = f"rail_{eid}"
+            seen_edges.add(eid)
+            attrs = dict(edge.attributes or {})
+            if "transport" not in attrs:
+                attrs["transport"] = "rail"
+            merged_edges.append(
+                EdgePayload(
+                    id=eid,
+                    source=edge.source,
+                    target=edge.target,
+                    segment_id=edge.segment_id,
+                    geometry=edge.geometry,
+                    attributes=attrs,
+                )
+            )
+
+        return GraphPayload(nodes=merged_nodes, edges=merged_edges)
 

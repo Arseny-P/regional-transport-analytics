@@ -9,6 +9,63 @@ class TransportMode(str, Enum):
     ROAD = "road"
     RAIL = "rail"
     SEA = "sea"
+    ROAD_RAIL = "road,rail"
+    MULTIMODAL = "multimodal"
+
+
+class RailObjectType(str, Enum):
+    RAIL_FACILITY = "rail_facility"
+    RAIL_NODE = "rail_node"
+
+
+class RailNodeKind(str, Enum):
+    STATION = "station"
+    TERMINAL = "terminal"
+    SWITCH = "switch"
+    JUNCTION = "junction"
+    ENDPOINT = "endpoint"
+    BUFFER_STOP = "buffer_stop"
+    BOUNDARY = "boundary"
+    CROSSING = "crossing"
+    INTERMEDIATE = "intermediate"
+
+
+class RailConnectionStatus(str, Enum):
+    CONNECTED = "connected"
+    NOT_CHECKED = "not_checked"
+    NOT_CONNECTED = "not_connected"
+
+
+@dataclass
+class RailFacility:
+    """
+    Железнодорожный логистический объект (станция, грузовой терминал).
+    Станция остается единым объектом, но может иметь несколько подтвержденных
+    точек подключения к сети (anchor_node_ids).
+    """
+    facility_id: str
+    name: str
+    latitude: float
+    longitude: float
+    anchor_node_ids: List[str] = field(default_factory=list)
+    connection_status: str = RailConnectionStatus.NOT_CHECKED.value
+    cargo_status: str = "unknown"
+    cargo_evidence: Optional[str] = None
+    source_osm_ids: List[str] = field(default_factory=list)
+    source_tags: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "facility_id": self.facility_id,
+            "name": self.name,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "anchor_node_ids": list(self.anchor_node_ids),
+            "connection_status": self.connection_status,
+            "cargo_status": self.cargo_status,
+            "cargo_evidence": self.cargo_evidence,
+            "source_osm_ids": list(self.source_osm_ids),
+        }
 
 
 class RouteStatus(str, Enum):
@@ -316,6 +373,7 @@ class AnalysisRequest:
     max_snap_distance_m: Optional[float] = 250.0
 
     knn: Optional[int] = None
+    transport_mode: str = TransportMode.ROAD.value
     output_dir: str = "data"
     output_alias: Optional[str] = None
     save_artifacts: bool = True
@@ -352,6 +410,7 @@ class AnalysisRequest:
             osm_tags=data.get("osm_tags"),
             max_snap_distance_m=float(data["max_snap_distance_m"]) if data.get("max_snap_distance_m") is not None else 250.0,
             knn=int(data["knn"]) if data.get("knn") is not None else None,
+            transport_mode=str(data.get("transport_mode", data.get("transport", TransportMode.ROAD.value))),
             output_dir=str(data.get("output_dir", "data")),
             output_alias=data.get("output_alias"),
             save_artifacts=bool(data.get("save_artifacts", True)),
@@ -376,6 +435,8 @@ class AnalysisResponse:
     warnings: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
     graph_object: Optional[Any] = field(default=None, repr=False)
+    facilities: List[Any] = field(default_factory=list, repr=False)
+    physical_graph: Optional[Any] = field(default=None, repr=False)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
