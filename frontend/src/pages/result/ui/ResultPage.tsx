@@ -61,7 +61,8 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
-  const { status, result, requestError } = useAnalysisJob(jobId);
+  const { status, result, heartbeatFailure, resultFailure, isLoadingResult, retryResult } =
+    useAnalysisJob(jobId);
   const [searchParams] = useSearchParams();
   const { regions } = useRegions();
   const regionId =
@@ -90,45 +91,62 @@ function JobResult({ jobId }: { jobId: string }) {
     () => (latitude === undefined || longitude === undefined ? null : [latitude, longitude]),
     [latitude, longitude]
   );
-  const notFound = requestError instanceof ApiError && requestError.status === 404;
-  const requestFailed = !!requestError && !isRetryableAnalysisRequest(requestError);
+  const heartbeatUnavailable = heartbeatFailure?.retrying === false;
+  const resultUnavailable = resultFailure?.retrying === false;
+  const requestFailure = heartbeatUnavailable ? heartbeatFailure : resultFailure;
+  const requestFailed = heartbeatUnavailable || resultUnavailable;
+  const notFound = requestFailure?.error instanceof ApiError && requestFailure.error.status === 404;
   const isFinal = !!job && isFinalState(job.status);
-  const isWaiting = !requestFailed && !graph && (!isFinal || !result);
+  const isWaiting = !requestFailed && !graph && (!isFinal || isLoadingResult);
   const hasGraph = !!graph?.nodes.length;
+  const showRequestFailure = requestFailed && !graph;
   const changeArea = <Button onClick={() => navigate('/start')}>Начать новый анализ</Button>;
+  const retryResultControl = resultUnavailable &&
+    isRetryableAnalysisRequest(resultFailure.error) && (
+      <Button onClick={retryResult}>Повторить загрузку результата</Button>
+    );
   const cancelControl =
     job && !isFinal ? <Button onClick={returnToArea}>Отменить анализ</Button> : null;
-  const waitingTitle = requestError
-    ? 'Восстанавливаем соединение'
-    : job?.status === 'queued'
-      ? 'Анализ в очереди'
-      : job?.status === 'cancel_requested'
-        ? 'Ожидаем отмены анализа'
-        : job?.status === 'running'
-          ? 'Выполняется анализ'
-          : 'Получаем состояние задачи';
+  const waitingFailure = resultFailure ?? heartbeatFailure;
+  const waitingTitle = resultFailure
+    ? 'Повторяем загрузку результата'
+    : heartbeatFailure
+      ? 'Восстанавливаем соединение'
+      : isLoadingResult
+        ? 'Загружаем результат анализа'
+        : job?.status === 'queued'
+          ? 'Анализ в очереди'
+          : job?.status === 'cancel_requested'
+            ? 'Ожидаем отмены анализа'
+            : job?.status === 'running'
+              ? 'Выполняется анализ'
+              : 'Получаем состояние задачи';
 
   const sidebar = notFound ? (
     <p className={styles.error}>Задача не найдена. Запустите новый анализ.</p>
   ) : (
     <>
-      <p
-        className={styles.status}
-        data-status={requestFailed ? 'failed' : job?.status}
-        role="status"
-      >
-        Статус: {requestFailed ? 'Ошибка' : job ? STATUS_LABELS[job.status] : 'подключение...'}
+      <p className={styles.status} data-status={job?.status} role="status">
+        Статус: {job ? STATUS_LABELS[job.status] : 'подключение...'}
       </p>
       {failureMessage && <p className={styles.error}>{failureMessage}</p>}
-      {requestError && (
+      {graph && heartbeatFailure && (
         <p className={styles.warning} role="alert">
-          {analysisRequestErrorMessage(requestError)}
+          Не удалось обновить статус. {analysisRequestErrorMessage(heartbeatFailure.error)}
         </p>
+      )}
+      {graph && resultFailure && (
+        <>
+          <p className={styles.warning} role="alert">
+            Не удалось загрузить результат. {analysisRequestErrorMessage(resultFailure.error)}
+          </p>
+          {retryResultControl}
+        </>
       )}
       {job?.status === 'cancel_requested' && (
         <p role="status">Отмена запрошена. Ожидаем подтверждения сервера.</p>
       )}
-      {!isWaiting && cancelControl}
+      {!isWaiting && !showRequestFailure && cancelControl}
       {job?.status === 'canceled' && hasGraph && (
         <p role="status">Анализ отменён. Доступен ранее построенный граф.</p>
       )}
@@ -214,27 +232,40 @@ function JobResult({ jobId }: { jobId: string }) {
           <Message
             title={waitingTitle}
             description={
-              requestError
-                ? `${analysisRequestErrorMessage(requestError)} Повторяем запрос автоматически.`
+              waitingFailure
+                ? `${analysisRequestErrorMessage(waitingFailure.error)} Повторяем запрос автоматически.`
                 : job?.status === 'cancel_requested'
                   ? 'Запрос на отмену отправлен. Дождитесь подтверждения сервера.'
-                  : 'Ожидаем готовности графа выбранной территории.'
+                  : isLoadingResult
+                    ? 'Получаем данные анализа с сервера.'
+                    : 'Ожидаем готовности графа выбранной территории.'
             }
             icon={<Spinner size="large" text="" />}
             actions={cancelControl}
           />
         </div>
       )}
-      {requestFailed && (
+      {showRequestFailure && requestFailure && (
         <div className={styles.overlay}>
           <Message
-            title={notFound ? 'Анализ не найден' : 'Не удалось получить результат'}
-            description={analysisRequestErrorMessage(requestError)}
-            actions={changeArea}
+            title={
+              notFound
+                ? 'Анализ не найден'
+                : heartbeatUnavailable
+                  ? 'Не удалось обновить статус анализа'
+                  : 'Не удалось получить результат'
+            }
+            description={analysisRequestErrorMessage(requestFailure.error)}
+            actions={
+              <>
+                {retryResultControl}
+                {changeArea}
+              </>
+            }
           />
         </div>
       )}
-      {!requestFailed && isFinal && !!result && !hasGraph && (
+      {!requestFailed && !isLoadingResult && isFinal && !!result && !hasGraph && (
         <div className={styles.overlay}>
           <Message
             title={
