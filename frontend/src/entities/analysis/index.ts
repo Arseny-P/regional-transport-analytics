@@ -3,11 +3,14 @@ export type {
   AnalysisResult,
   AnalysisStatus,
   Graph,
+  GraphTransportMode,
   JobState,
   Metric,
   NodeSelection,
+  RailNodeKind,
 } from './model/types';
-export { isFinalState } from './model/types';
+export { GRAPH_TRANSPORT_MODES, isFinalState } from './model/types';
+export { getGraphTransports, getNodeTransport } from './lib/graphTransport';
 export { useAnalysisJob } from './model/useAnalysisJob';
 export { GraphLayer } from './ui/GraphLayer';
 export {

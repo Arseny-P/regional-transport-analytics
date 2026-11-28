@@ -1,0 +1,51 @@
+.symbol {
+  --marker-shape: circle(50%);
+  --marker-fill: currentColor;
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.symbol[data-kind='switch'] {
+  --marker-shape: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.symbol[data-kind='endpoint'] {
+  --marker-shape: inset(0);
+}
+
+.symbol[data-kind='boundary'] {
+  --marker-shape: polygon(50% 0, 100% 100%, 0 100%);
+  --marker-fill: #fff;
+}
+
+.symbol::before,
+.symbol::after {
+  position: absolute;
+  content: '';
+  clip-path: var(--marker-shape);
+}
+
+.symbol::before {
+  inset: 0;
+  background-color: currentColor;
+}
+
+.symbol::after {
+  inset: 2px;
+  background-color: var(--marker-fill);
+}
+
+.symbol[data-selected]::before {
+  background-color: #111827;
+}
+
+.symbol[data-selected][data-kind='boundary']::before {
+  background-color: currentColor;
+}
+
+.symbol[data-selected][data-kind='boundary'] {
+  filter: drop-shadow(1px 0 #111827) drop-shadow(-1px 0 #111827) drop-shadow(0 -1px #111827)
+    drop-shadow(0 1px #111827);
+}

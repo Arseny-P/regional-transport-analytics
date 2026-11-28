@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { API_MOCKS_ENABLED } from '@/shared/config';
 
 import { App } from './App';
 
@@ -7,7 +8,7 @@ import './styles/index.css';
 import 'leaflet/dist/leaflet.css';
 import './leafletIcons';
 
-if (import.meta.env.DEV && import.meta.env.VITE_API_MOCKS === 'true') {
+if (API_MOCKS_ENABLED) {
   const { worker } = await import('./mocks/browser');
   await worker.start({ onUnhandledFrame: 'bypass' });
 }

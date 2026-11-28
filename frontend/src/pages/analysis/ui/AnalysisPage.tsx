@@ -3,10 +3,11 @@ import type { LatLngTuple, Map as LeafletMap } from 'leaflet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
-import { analysisRequestErrorMessage } from '@/entities/analysis';
+import { GRAPH_TRANSPORT_MODES, analysisRequestErrorMessage } from '@/entities/analysis';
 import { useRunAnalysis } from '@/features/run-analysis';
 import { SelectArea } from '@/features/select-area';
 import { Button, Message, Spinner } from '@/shared/ui';
+import { API_MOCKS_ENABLED } from '@/shared/config';
 import type { BBox } from '@/entities/area';
 import { RegionBoundary, useRegion } from '@/entities/region';
 import {
@@ -17,11 +18,13 @@ import {
 } from '@/entities/transport-mode';
 import styles from './AnalysisPage.module.css';
 
+const TRANSPORT_OPTIONS = API_MOCKS_ENABLED ? GRAPH_TRANSPORT_MODES : TRANSPORT_MODES;
+
 export function AnalysisPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const regionId = searchParams.get('region_id');
-  const { region, error: regionError, retry: retryRegion } = useRegion(regionId);
+  const { region, error: regionError } = useRegion(regionId);
   const mapRef = useRef<LeafletMap>(null);
   const [selectedArea, setSelectedArea] = useState<BBox | null>(null);
   const [point1, setPoint1] = useState('');
@@ -111,7 +114,7 @@ export function AnalysisPage() {
 
       <div className={styles.transports}>
         <h3 className={styles.title}>Виды транспорта:</h3>
-        {TRANSPORT_MODES.map((mode) => (
+        {TRANSPORT_OPTIONS.map((mode) => (
           <label key={mode} className={styles.transport}>
             <input
               type="checkbox"
@@ -150,11 +153,7 @@ export function AnalysisPage() {
 
       <div className={styles.actions}>
         <span className={styles.hint}>{hint}</span>
-        {error && (
-          <span className={styles.error} role="alert">
-            {error}
-          </span>
-        )}
+        {error && <span className={styles.error}>{error}</span>}
         <Button
           onClick={startAnalysis}
           disabled={!region || !selectedArea || !transports.length || isLoading}
@@ -171,12 +170,7 @@ export function AnalysisPage() {
                 ? analysisRequestErrorMessage(regionError)
                 : 'Выберите регион, чтобы задать область анализа.'
             }
-            actions={
-              <>
-                {regionError && <Button onClick={retryRegion}>Повторить загрузку границ</Button>}
-                <Button onClick={() => navigate('/start')}>К выбору региона</Button>
-              </>
-            }
+            actions={<Button onClick={() => navigate('/start')}>К выбору региона</Button>}
           />
         </div>
       )}

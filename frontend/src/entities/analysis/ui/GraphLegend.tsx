@@ -1,33 +1,68 @@
 import { METRIC_LABELS, METRIC_DESCRIPTIONS, formatMetricValue } from '../config/metricLabels';
+import { GRAPH_LINE_STYLES, RAIL_NODE_LABELS } from '../config/graphStyles';
 import { nodeMetricScale } from '../lib/nodeColor';
-import type { Graph, Metric } from '../model/types';
+import type { GraphNode, GraphTransportMode, Metric } from '../model/types';
 import styles from './GraphLegend.module.css';
+import markerStyles from './RailNodeMarker.module.css';
 
 interface GraphLegendProps {
   colorBy?: string;
-  graph?: Graph | null;
+  nodes: readonly GraphNode[];
+  visibleModes: readonly GraphTransportMode[];
   metrics?: readonly Metric[];
 }
 
-export function GraphLegend({ colorBy, graph, metrics = [] }: GraphLegendProps) {
-  const { min, max } = nodeMetricScale(graph?.nodes ?? [], metrics, colorBy);
+export function GraphLegend({ colorBy, nodes, visibleModes, metrics = [] }: GraphLegendProps) {
+  const { min, max } = nodeMetricScale(nodes, metrics, colorBy);
   const hasValues = Number.isFinite(min) && Number.isFinite(max);
   return (
     <section className={styles.legend} aria-label="Легенда графа">
       <h4 className={styles.title}>Легенда</h4>
       <ul className={styles.items}>
-        <li className={styles.row}>
-          <span className={styles.warehouse} aria-hidden="true" />
-          <span>Склады</span>
-        </li>
-        <li className={styles.row}>
-          <span className={styles.intersection} aria-hidden="true" />
-          <span>Перекрёстки</span>
-        </li>
-        <li className={styles.row}>
-          <span className={styles.road} aria-hidden="true" />
-          <span>Участки маршрутов</span>
-        </li>
+        {visibleModes.includes('road') && (
+          <>
+            <li className={styles.row}>
+              <span className={styles.warehouse} aria-hidden="true" />
+              <span>Склады</span>
+            </li>
+            <li className={styles.row}>
+              <span className={styles.intersection} aria-hidden="true" />
+              <span>Перекрёстки</span>
+            </li>
+            <li className={styles.row}>
+              <span
+                className={styles.road}
+                style={{ backgroundColor: GRAPH_LINE_STYLES.road.color }}
+                aria-hidden="true"
+              />
+              <span>Автомобильные участки маршрутов</span>
+            </li>
+          </>
+        )}
+        {visibleModes.includes('rail') && (
+          <>
+            <li className={styles.row}>
+              <span
+                className={styles.rail}
+                style={{ borderColor: GRAPH_LINE_STYLES.rail.color }}
+                aria-hidden="true"
+              />
+              <span>Железнодорожные пути</span>
+            </li>
+            {Object.entries(RAIL_NODE_LABELS).map(([kind, label]) => (
+              <li key={kind} className={styles.row}>
+                <span
+                  className={styles.railNode}
+                  style={{ color: GRAPH_LINE_STYLES.rail.color }}
+                  aria-hidden="true"
+                >
+                  <span className={markerStyles.symbol} data-kind={kind} />
+                </span>
+                <span>{label}</span>
+              </li>
+            ))}
+          </>
+        )}
         <li className={styles.row}>
           <span className={styles.selected} aria-hidden="true" />
           <span>Выбранная вершина</span>

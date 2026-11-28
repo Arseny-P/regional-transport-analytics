@@ -54,7 +54,16 @@
 
 .road {
   height: 2px;
-  background-color: #555;
+}
+
+.rail {
+  border-top: 3px dashed;
+}
+
+.railNode {
+  width: 14px;
+  height: 14px;
+  justify-self: center;
 }
 
 .selected {

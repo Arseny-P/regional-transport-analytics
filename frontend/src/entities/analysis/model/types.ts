@@ -20,9 +20,13 @@ export interface AnalysisStatus {
 
 type Attributes = Record<string, unknown>;
 
+export const GRAPH_TRANSPORT_MODES = ['road', 'rail'] as const;
+export type GraphTransportMode = (typeof GRAPH_TRANSPORT_MODES)[number];
+export type RailNodeKind = 'switch' | 'junction' | 'endpoint' | 'boundary';
+
 export interface NodeSelection {
   id: string;
-  type: 'warehouse' | 'intersection';
+  type: 'warehouse' | 'intersection' | 'rail_node';
 }
 
 export interface GraphNode {
@@ -30,6 +34,9 @@ export interface GraphNode {
   position: Position;
   attributes?: Attributes & {
     object_type?: NodeSelection['type'] | 'road_node';
+    transport_mode?: GraphTransportMode;
+    node_kind?: RailNodeKind;
+    physical_degree?: number;
     name?: string;
     is_isolated?: boolean;
     isolation_reason?: string;
@@ -44,6 +51,7 @@ export interface GraphEdge {
   geometry?: Position[];
   attributes?: Attributes & {
     edge_type?: 'road' | 'access_connector';
+    transport_mode?: GraphTransportMode;
     length_m?: number;
     oneway?: boolean;
     routes_count?: number;
