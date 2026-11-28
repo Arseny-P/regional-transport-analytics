@@ -6,8 +6,10 @@ cache/
 PM-research/
 
 CONTEXT.md
+!CONTEXT.md
 PYTHON_GRAPH_SERVICE_STRUCTURE.md
 sprint*.md
+!sprint6-back.md
 openapi.yaml
 arch.md
 pr*.md
@@ -19,6 +21,7 @@ data/*.graphml
 data/*.geojson
 data/*_response.json
 !data/example_road_graph_response.json
+!data/example_rail_graph_response.json
 data/example_response.json
 data/kronshtadt_network.*
 data/central_district.*

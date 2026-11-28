@@ -1,0 +1,47 @@
+{
+  "status": "success",
+  "territory": {
+    "type": "bbox",
+    "bbox": {
+      "min_lat": 59.795,
+      "min_lon": 30.385,
+      "max_lat": 59.824,
+      "max_lon": 30.441
+    }
+  },
+  "summary": {
+    "total_rail_nodes": 86,
+    "total_physical_segments": 90,
+    "total_directed_edges": 180,
+    "station_candidates_count": 2,
+    "connected_stations_count": 0,
+    "switch_count": 36,
+    "execution_time_sec": 0.02
+  },
+  "artifacts": {},
+  "hubs": [
+    {
+      "id": "station:922690113",
+      "name": "Юный",
+      "latitude": 59.8057207,
+      "longitude": 30.3880789,
+      "anchor_node_ids": [],
+      "connection_status": "not_checked",
+      "cargo_status": "unknown"
+    },
+    {
+      "id": "station:1377619868",
+      "name": "Шушары",
+      "latitude": 59.8057985,
+      "longitude": 30.3884693,
+      "anchor_node_ids": [],
+      "connection_status": "not_checked",
+      "cargo_status": "unknown"
+    }
+  ],
+  "connections": [],
+  "routes": [],
+  "geojson": null,
+  "warnings": [],
+  "error_message": null
+}
