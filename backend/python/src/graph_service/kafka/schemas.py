@@ -122,7 +122,7 @@ class StartCommandPayload:
     def validate_transports(self) -> None:
         """
         Проверяет, поддерживаются ли все указанные виды транспорта.
-        Поддерживаются 'road' и 'rail'.
+        Поддерживаются 'road', 'rail', а также их одновременный запрос ['road', 'rail'].
         """
         unsupported = set(self.transports) - SUPPORTED_TRANSPORTS
         if unsupported:
@@ -130,11 +130,15 @@ class StartCommandPayload:
                 f"Неподдерживаемые виды транспорта: {sorted(list(unsupported))}. "
                 f"Поддерживается только: {sorted(list(SUPPORTED_TRANSPORTS))}"
             )
-        if len(self.transports) > 1:
-            raise ValueError(
-                "Одновременный анализ нескольких видов транспорта не поддерживается. "
-                "Пожалуйста, укажите ровно один вид транспорта: 'road' или 'rail'."
-            )
+
+    def get_transport_type(self) -> Optional[str]:
+        """
+        Возвращает строковое значение вида транспорта, если указан один вид,
+        либо None при одновременном анализе нескольких видов (для раздельной диспетчеризации).
+        """
+        if len(self.transports) == 1:
+            return self.transports[0]
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         res: Dict[str, Any] = {

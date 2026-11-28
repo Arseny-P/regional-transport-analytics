@@ -75,7 +75,7 @@ class TestKafkaContract(unittest.TestCase):
         start_payload.validate_transports()
         self.assertEqual(start_payload.transports, ["rail"])
 
-    def test_start_command_multiple_transports_not_supported(self):
+    def test_start_command_multiple_transports_supported(self):
         payload_data = {
             "area": {
                 "first_point": {"latitude": 59.90, "longitude": 30.25},
@@ -84,9 +84,22 @@ class TestKafkaContract(unittest.TestCase):
             "transports": ["road", "rail"],
         }
         start_payload = StartCommandPayload.from_dict(payload_data)
+        start_payload.validate_transports()
+        self.assertEqual(start_payload.transports, ["road", "rail"])
+        self.assertIsNone(start_payload.get_transport_type())
+
+    def test_start_command_unsupported_transport_in_list(self):
+        payload_data = {
+            "area": {
+                "first_point": {"latitude": 59.90, "longitude": 30.25},
+                "second_point": {"latitude": 59.95, "longitude": 30.35},
+            },
+            "transports": ["road", "sea"],
+        }
+        start_payload = StartCommandPayload.from_dict(payload_data)
         with self.assertRaises(ValueError) as ctx:
             start_payload.validate_transports()
-        self.assertIn("не поддерживается", str(ctx.exception))
+        self.assertIn("Неподдерживаемые виды транспорта", str(ctx.exception))
 
     def test_invalid_area_coordinates(self):
         # Широта вне диапазона [-90, 90]
