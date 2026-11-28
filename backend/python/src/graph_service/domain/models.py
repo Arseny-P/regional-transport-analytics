@@ -34,6 +34,38 @@ class RailConnectionStatus(str, Enum):
     NOT_CONNECTED = "not_connected"
 
 
+@dataclass
+class RailFacility:
+    """
+    Железнодорожный логистический объект (станция, грузовой терминал).
+    Станция остается единым объектом, но может иметь несколько подтвержденных
+    точек подключения к сети (anchor_node_ids).
+    """
+    facility_id: str
+    name: str
+    latitude: float
+    longitude: float
+    anchor_node_ids: List[str] = field(default_factory=list)
+    connection_status: str = RailConnectionStatus.NOT_CHECKED.value
+    cargo_status: str = "unknown"
+    cargo_evidence: Optional[str] = None
+    source_osm_ids: List[str] = field(default_factory=list)
+    source_tags: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "facility_id": self.facility_id,
+            "name": self.name,
+            "latitude": self.latitude,
+            "longitude": self.longitude,
+            "anchor_node_ids": list(self.anchor_node_ids),
+            "connection_status": self.connection_status,
+            "cargo_status": self.cargo_status,
+            "cargo_evidence": self.cargo_evidence,
+            "source_osm_ids": list(self.source_osm_ids),
+        }
+
+
 class RouteStatus(str, Enum):
     FOUND = "found"
     NOT_FOUND_IN_DATA = "not_found_in_data"
