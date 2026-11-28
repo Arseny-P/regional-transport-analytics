@@ -40,9 +40,10 @@ func (c *Consumer) FetchMessage(ctx context.Context) (domain.InboxMessage, kafka
 	}
 
 	inboxMessage := domain.InboxMessage{
-		MessageID: dtoInboxMessage.MessageID,
-		JobID:     dtoInboxMessage.JobID,
-		Type:      dtoInboxMessage.Type,
+		MessageID:     dtoInboxMessage.MessageID,
+		JobID:         dtoInboxMessage.JobID,
+		TransportType: domain.Transport(dtoInboxMessage.TransportType),
+		Type:          dtoInboxMessage.Type,
 		Payload: domain.AnalysisPayload{
 			Status: domain.JobStatus(dtoInboxMessage.Payload.Status),
 		},
@@ -99,17 +100,25 @@ func validateInboxMessage(message *kafkadto.InboxMessage) error {
 	if message.MessageID == uuid.Nil || message.JobID == uuid.Nil {
 		return fmt.Errorf("%w: message_id and job_id must be nonzero UUIDs", domain.ErrInvalidKafkaMessage)
 	}
+
+	switch domain.Transport(message.TransportType) {
+	case "", domain.Road, domain.Rail, domain.Sea:
+	default:
+		return fmt.Errorf("%w: unsupported transport_type %q", domain.ErrInvalidKafkaMessage, message.TransportType)
+	}
 	switch message.Type {
-	case "STATUS", "RESULT":
+	case "STATUS":
+		if message.Payload.Status == "running" || message.Payload.Status == "canceled" {
+			return nil
+		}
+	case "RESULT":
+		if message.Payload.Status == "completed" || message.Payload.Status == "failed" {
+			return nil
+		}
 	default:
 		return fmt.Errorf("%w: unsupported event type %q", domain.ErrInvalidKafkaMessage, message.Type)
 	}
-	switch message.Payload.Status {
-	case "queued", "running", "completed", "failed", "cancel_requested", "canceled":
-	default:
-		return fmt.Errorf("%w: unsupported job status %q", domain.ErrInvalidKafkaMessage, message.Payload.Status)
-	}
-	return nil
+	return fmt.Errorf("%w: unsupported status %q for %s", domain.ErrInvalidKafkaMessage, message.Payload.Status, message.Type)
 }
 
 func (c *Consumer) CommitMessage(ctx context.Context, message *kafka.Message) error {

@@ -21,7 +21,7 @@ type RegionUsecase interface {
 }
 
 type JobUsecase interface {
-	GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error)
+	GetAnalysisResult(context.Context, uuid.UUID, []domain.Transport) (domain.AnalysisResult, error)
 	CancelJob(context.Context, uuid.UUID) (domain.AnalysisResult, bool, error)
 	CreateJob(context.Context, uuid.UUID, uuid.UUID, float64, float64, float64, float64, []domain.Transport) (domain.JobStatus, bool, error)
 }
