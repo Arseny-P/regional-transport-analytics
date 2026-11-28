@@ -17,7 +17,7 @@ async function createWithRetry(jobId: string, body: CreateAnalysisRequest, attem
   }
 }
 
-export function useRunAnalysis(onSuccess: (jobId: string) => void) {
+export function useRunAnalysis() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,14 +25,14 @@ export function useRunAnalysis(onSuccess: (jobId: string) => void) {
     setIsLoading(true);
     setError(null);
     try {
-      const receipt = await createWithRetry(crypto.randomUUID(), {
+      return await createWithRetry(crypto.randomUUID(), {
         region_id: regionId,
         area: toAnalysisArea(area),
         transports,
       });
-      onSuccess(receipt.job_id);
     } catch (err) {
       setError(errorMessage(err as Error));
+    } finally {
       setIsLoading(false);
     }
   };

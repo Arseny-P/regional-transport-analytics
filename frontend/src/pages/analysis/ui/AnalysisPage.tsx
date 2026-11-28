@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import type { LatLngTuple, Map as LeafletMap } from 'leaflet';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
@@ -21,15 +22,29 @@ export function AnalysisPage() {
   const [searchParams] = useSearchParams();
   const regionId = searchParams.get('region_id');
   const { region, error: regionError } = useRegion(regionId);
+  const mapRef = useRef<LeafletMap>(null);
   const [selectedArea, setSelectedArea] = useState<BBox | null>(null);
   const [point1, setPoint1] = useState('');
   const [point2, setPoint2] = useState('');
   const [transports, setTransports] = useState<TransportMode[]>(DEFAULT_TRANSPORT_MODES);
-  const { run, isLoading, error } = useRunAnalysis((jobId) =>
+  const { run, isLoading, error } = useRunAnalysis();
+
+  const startAnalysis = async () => {
+    const map = mapRef.current;
+    if (!map || !region || !selectedArea) return;
+
+    const { lat, lng } = map.getCenter();
+    const center: LatLngTuple = [lat, lng];
+    const zoom = map.getZoom();
+    const receipt = await run(region.region_id, selectedArea, transports);
+    if (!receipt) return;
+
+    const jobId = receipt.job_id;
     navigate(
-      `/result?job_id=${encodeURIComponent(jobId)}&region_id=${encodeURIComponent(regionId ?? '')}`
-    )
-  );
+      `/result?job_id=${encodeURIComponent(jobId)}&region_id=${encodeURIComponent(region.region_id)}`,
+      { state: { jobId, center, zoom, bounds: selectedArea } }
+    );
+  };
 
   const toggleTransport = (mode: TransportMode) =>
     setTransports((current) =>
@@ -122,7 +137,7 @@ export function AnalysisPage() {
   return (
     <div className={styles.page}>
       <AppSidebar>{sidebarContent}</AppSidebar>
-      <MapView>
+      <MapView mapRef={mapRef}>
         {region && <RegionBoundary region={region} />}
         <SelectArea
           onChange={setSelectedArea}
@@ -137,7 +152,7 @@ export function AnalysisPage() {
         <span className={styles.hint}>{hint}</span>
         {error && <span className={styles.error}>{error}</span>}
         <Button
-          onClick={() => region && selectedArea && run(region.region_id, selectedArea, transports)}
+          onClick={startAnalysis}
           disabled={!region || !selectedArea || !transports.length || isLoading}
         >
           {isLoading ? 'Запуск анализа...' : 'Начать анализ'}
