@@ -48,3 +48,24 @@
 .actions > * {
   width: 100%;
 }
+
+/* Значок и цвет помогают различить ошибку и отмену. */
+.badge {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 8px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 16px;
+  vertical-align: 0.1em;
+}
+
+.message[data-variant='error'] .title {
+  color: var(--error-msg);
+}
+
+.message[data-variant='canceled'] .title {
+  color: var(--text-secondary);
+}

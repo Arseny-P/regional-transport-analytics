@@ -3,7 +3,6 @@ export const METRIC_LABELS: Readonly<Record<string, string>> = {
   warehouse_count: 'Количество складов',
   intersection_count: 'Количество перекрёстков',
   road_segment_count: 'Количество дорожных участков',
-  isolated_warehouse_count: 'Складов без подключения к графу маршрутов',
   nearest_warehouse_distance_m: 'До ближайшего склада по дорогам',
   nearby_warehouse_count: 'Складов в заданном радиусе по дорогам',
   pagerank: 'PageRank',
@@ -18,7 +17,6 @@ export const REGION_METRIC_NAMES = [
   'warehouse_count',
   'intersection_count',
   'road_segment_count',
-  'isolated_warehouse_count',
 ] as const;
 
 export const NODE_METRIC_NAMES = [

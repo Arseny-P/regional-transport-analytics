@@ -335,6 +335,7 @@ function JobResult({ jobId }: { jobId: string }) {
                   ? 'Не удалось обновить статус анализа'
                   : 'Не удалось получить результат'
             }
+            variant="error"
             description={analysisRequestErrorMessage(requestFailure.error)}
             actions={
               <>
@@ -356,6 +357,7 @@ function JobResult({ jobId }: { jobId: string }) {
                   ? 'Анализ отменён'
                   : 'Данные не найдены'
             }
+            variant={canceled ? 'canceled' : job?.status === 'failed' ? 'error' : undefined}
             description={
               failureMessage ??
               (job?.status === 'failed'
