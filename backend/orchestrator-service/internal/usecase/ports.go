@@ -11,7 +11,7 @@ import (
 
 type JobRepository interface {
 	GetJob(context.Context, uuid.UUID) (domain.Job, error)
-	GetAnalysisResult(context.Context, uuid.UUID) (domain.AnalysisResult, error)
+	GetAnalysisResult(context.Context, uuid.UUID, []domain.Transport) (domain.AnalysisResult, error)
 	CreateJob(context.Context, *domain.Job) error
 	RequestJobCancellation(context.Context, uuid.UUID) (domain.JobStatus, error)
 }

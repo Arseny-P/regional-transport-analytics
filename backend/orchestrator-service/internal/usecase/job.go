@@ -11,8 +11,8 @@ import (
 	"github.com/peterstace/simplefeatures/geom"
 )
 
-func (u *Usecase) GetAnalysisResult(ctx context.Context, jobID uuid.UUID) (domain.AnalysisResult, error) {
-	return u.jobRepository.GetAnalysisResult(ctx, jobID)
+func (u *Usecase) GetAnalysisResult(ctx context.Context, jobID uuid.UUID, transports []domain.Transport) (domain.AnalysisResult, error) {
+	return u.jobRepository.GetAnalysisResult(ctx, jobID, transports)
 }
 
 func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
@@ -109,7 +109,7 @@ func (u *Usecase) CreateJob(ctx context.Context, jobID, regionID uuid.UUID,
 
 func (u *Usecase) CancelJob(ctx context.Context, jobID uuid.UUID) (domain.AnalysisResult, bool, error) {
 
-	result, err := u.jobRepository.GetAnalysisResult(ctx, jobID)
+	result, err := u.jobRepository.GetAnalysisResult(ctx, jobID, []domain.Transport{})
 	if err != nil {
 		return domain.AnalysisResult{}, false, err
 	}
