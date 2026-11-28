@@ -21,7 +21,7 @@ export function AnalysisPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const regionId = searchParams.get('region_id');
-  const { region, error: regionError } = useRegion(regionId);
+  const { region, error: regionError, retry: retryRegion } = useRegion(regionId);
   const mapRef = useRef<LeafletMap>(null);
   const [selectedArea, setSelectedArea] = useState<BBox | null>(null);
   const [point1, setPoint1] = useState('');
@@ -150,7 +150,11 @@ export function AnalysisPage() {
 
       <div className={styles.actions}>
         <span className={styles.hint}>{hint}</span>
-        {error && <span className={styles.error}>{error}</span>}
+        {error && (
+          <span className={styles.error} role="alert">
+            {error}
+          </span>
+        )}
         <Button
           onClick={startAnalysis}
           disabled={!region || !selectedArea || !transports.length || isLoading}
@@ -167,7 +171,12 @@ export function AnalysisPage() {
                 ? analysisRequestErrorMessage(regionError)
                 : 'Выберите регион, чтобы задать область анализа.'
             }
-            actions={<Button onClick={() => navigate('/start')}>К выбору региона</Button>}
+            actions={
+              <>
+                {regionError && <Button onClick={retryRegion}>Повторить загрузку границ</Button>}
+                <Button onClick={() => navigate('/start')}>К выбору региона</Button>
+              </>
+            }
           />
         </div>
       )}

@@ -34,13 +34,14 @@ export function StartPage() {
   const [uploadedRegion, setUploadedRegion] = useState<Region | null>(null);
   const [uploadStatus, setUploadStatus] = useState<UploadStatus>({ type: 'idle' });
   const fileInput = useRef<HTMLInputElement>(null);
-  const { regions, error: listError, addRegion } = useRegions();
+  const { regions, error: listError, addRegion, retry: retryRegionList } = useRegions();
   const selectedUpload = uploadedRegion?.region_id === regionId ? uploadedRegion : null;
-  const { region: fetchedRegion, error: regionError } = useRegion(
-    selectedUpload ? null : regionId || null
-  );
+  const {
+    region: fetchedRegion,
+    error: regionError,
+    retry: retryRegion,
+  } = useRegion(selectedUpload ? null : regionId || null);
   const region = selectedUpload ?? (fetchedRegion?.region_id === regionId ? fetchedRegion : null);
-  const error = listError ?? regionError;
   const isUploading = uploadStatus.type === 'loading';
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -126,7 +127,22 @@ export function StartPage() {
         </select>
       </label>
 
-      {error && <p className={styles.error}>{analysisRequestErrorMessage(error)}</p>}
+      {listError && (
+        <>
+          <p className={styles.error} role="alert">
+            {analysisRequestErrorMessage(listError)}
+          </p>
+          <Button onClick={retryRegionList}>Обновить список регионов</Button>
+        </>
+      )}
+      {regionError && (
+        <>
+          <p className={styles.error} role="alert">
+            {analysisRequestErrorMessage(regionError)}
+          </p>
+          <Button onClick={retryRegion}>Повторить загрузку границ</Button>
+        </>
+      )}
 
       <Button
         disabled={!region || isUploading}

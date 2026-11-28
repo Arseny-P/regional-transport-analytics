@@ -1,4 +1,4 @@
-import { ApiError } from '@/shared/api';
+import { ApiError, RequestTimeoutError } from '@/shared/api';
 
 const MESSAGES: Readonly<Record<string, string>> = {
   invalid_parameters:
@@ -52,6 +52,7 @@ export function analysisErrorMessage(error: { code?: string; message: string }):
 }
 
 export function analysisRequestErrorMessage(error: unknown): string {
+  if (error instanceof RequestTimeoutError) return error.message;
   if (!(error instanceof ApiError)) {
     return 'Не удалось связаться с сервером. Проверьте подключение к интернету и повторите попытку.';
   }

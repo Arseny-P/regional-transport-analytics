@@ -1,12 +1,12 @@
 import { request } from '@/shared/api';
 import type { Region, RegionList } from '../model/types';
 
-export function listRegions(): Promise<RegionList> {
-  return request('/regions');
+export function listRegions(signal?: AbortSignal): Promise<RegionList> {
+  return request('/regions', { signal });
 }
 
-export function getRegion(regionId: string): Promise<Region> {
-  return request(`/regions/${encodeURIComponent(regionId)}`);
+export function getRegion(regionId: string, signal?: AbortSignal): Promise<Region> {
+  return request(`/regions/${encodeURIComponent(regionId)}`, { signal });
 }
 
 export function uploadRegion(file: File): Promise<Region> {

@@ -13,6 +13,15 @@ export class ApiError extends Error {
   }
 }
 
+export class RequestTimeoutError extends Error {
+  constructor() {
+    super('Сервер не ответил вовремя. Повторите попытку.');
+    this.name = 'RequestTimeoutError';
+  }
+}
+
+const REQUEST_TIMEOUT_MS = 60_000;
+
 interface RequestOptions {
   method?: 'GET' | 'POST';
   params?: QueryParams;
@@ -42,16 +51,30 @@ export async function request<T>(
   path: string,
   { method = 'GET', params, body, signal }: RequestOptions = {}
 ): Promise<T> {
-  const response = await fetch(buildUrl(path, params), {
-    method,
-    signal,
-    ...(body instanceof FormData
-      ? { body }
-      : body !== undefined && {
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        }),
-  });
-  if (!response.ok) throw await toApiError(response);
-  return response.json() as Promise<T>;
+  signal?.throwIfAborted();
+  const controller = new AbortController();
+  const abort = () => controller.abort(signal?.reason);
+  signal?.addEventListener('abort', abort, { once: true });
+  const timer = setTimeout(() => controller.abort(new RequestTimeoutError()), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(buildUrl(path, params), {
+      method,
+      signal: controller.signal,
+      ...(body instanceof FormData
+        ? { body }
+        : body !== undefined && {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          }),
+    });
+    if (!response.ok) throw await toApiError(response);
+    return (await response.json()) as T;
+  } catch (error) {
+    controller.signal.throwIfAborted();
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', abort);
+  }
 }

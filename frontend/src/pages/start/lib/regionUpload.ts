@@ -1,4 +1,4 @@
-import { ApiError } from '@/shared/api';
+import { ApiError, RequestTimeoutError } from '@/shared/api';
 
 const MAX_REGION_FILE_SIZE = 20_000_000;
 const SIZE_ERROR = 'Файл GeoJSON не должен превышать 20 МБ.';
@@ -51,6 +51,7 @@ export async function validateRegionFile(file: File): Promise<string | null> {
 }
 
 export function getRegionUploadError(error: unknown): string {
+  if (error instanceof RequestTimeoutError) return error.message;
   if (!(error instanceof ApiError)) {
     return 'Не удалось связаться с сервером. Проверьте соединение и повторите загрузку.';
   }
