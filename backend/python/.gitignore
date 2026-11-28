@@ -6,10 +6,8 @@ cache/
 PM-research/
 
 CONTEXT.md
-!CONTEXT.md
 PYTHON_GRAPH_SERVICE_STRUCTURE.md
 sprint*.md
-!sprint6-back.md
 openapi.yaml
 arch.md
 pr*.md

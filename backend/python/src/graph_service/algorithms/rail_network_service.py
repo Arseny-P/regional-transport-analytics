@@ -64,15 +64,11 @@ class RailNetworkService:
         ways_cache_file = os.path.join(self.storage_dir, f"{alias}_rail_ways.json")
         objs_cache_file = os.path.join(self.storage_dir, f"{alias}_rail_objects.json")
 
-        # 1. Проверка оффлайн-режима
-        if config.osm_offline_mode:
+        # 1. Проверка наличия оффлайн-фикстур или режима OSM_OFFLINE_MODE
+        ways_fix, objs_fix = find_rail_fixture_files(alias=alias, custom_dir=self.storage_dir)
+
+        if ways_fix and os.path.exists(ways_fix) and (config.osm_offline_mode or not refetch):
             print(f"[*] [OFFLINE] Загрузка ЖД-данных из фикстур для {alias}...")
-            ways_fix, objs_fix = find_rail_fixture_files(alias=alias, custom_dir=self.storage_dir)
-            if not ways_fix or not os.path.exists(ways_fix):
-                raise OfflineDataNotFoundError(
-                    f"Оффлайн-фикстуры ЖД-путей не найдены для территории '{alias}'. "
-                    f"Проверены директории фикстур и кэша."
-                )
             with open(ways_fix, "r", encoding="utf-8") as f:
                 ways_data = json.load(f)
 
@@ -89,6 +85,11 @@ class RailNetworkService:
                     point_tags[el["id"]] = el["tags"]
 
             return {"elements": ways_elements}, point_tags, objs_elements
+        elif config.osm_offline_mode:
+            raise OfflineDataNotFoundError(
+                f"Оффлайн-фикстуры ЖД-путей не найдены для территории '{alias}'. "
+                f"Проверены директории фикстур и кэша."
+            )
 
         # 2. Локальный кэш
         if not refetch and os.path.exists(ways_cache_file) and os.path.exists(objs_cache_file):
