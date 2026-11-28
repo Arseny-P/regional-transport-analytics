@@ -521,13 +521,29 @@ class TerritoryAnalysisService:
 
         # 5. Экспорт артефактов (если включено)
         artifacts: Dict[str, Optional[str]] = {}
+        geojson_payload: Optional[Dict[str, Any]] = None
+
         if request.save_artifacts:
-            rail_graphml_file = os.path.join(storage_dir, f"{alias_base}_rail_simple.graphml")
+            rail_alias = alias_base if alias_base.endswith("_rail") else f"{alias_base}_rail"
+            rail_graphml_file = os.path.join(storage_dir, f"{rail_alias}_simple.graphml")
             try:
                 nx.write_graphml(G_simple, rail_graphml_file)
                 artifacts["rail_graphml"] = rail_graphml_file
             except Exception:
                 pass
+
+            try:
+                rail_geojson_file = rail_network_service.export_to_geojson(
+                    graph=G_simple,
+                    filename=rail_alias,
+                    facilities=facilities,
+                )
+                artifacts["rail_geojson"] = rail_geojson_file
+                if request.include_geojson_payload and os.path.exists(rail_geojson_file):
+                    with open(rail_geojson_file, "r", encoding="utf-8") as gf:
+                        geojson_payload = json.load(gf)
+            except Exception as geo_err:
+                warnings.append(f"Не удалось экспортировать ЖД GeoJSON: {geo_err}")
 
         elapsed = round(time.time() - start_time, 2)
         connected_facs = rail_facility_service.get_connected_facilities(facilities)
@@ -563,7 +579,7 @@ class TerritoryAnalysisService:
             hubs=hubs_data,
             connections=[],
             routes=[],
-            geojson=None,
+            geojson=geojson_payload,
             warnings=warnings,
             graph_object=routing_graph,
             facilities=facilities,

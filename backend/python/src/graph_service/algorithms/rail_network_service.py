@@ -413,3 +413,184 @@ class RailNetworkService:
                 result.add_edge(u, v, weight_cm=weight_cm, length_m=d["length_m"])
 
         return result
+
+    def export_to_geojson(
+        self,
+        graph: nx.Graph,
+        filename: str,
+        facilities: Optional[List[Any]] = None,
+    ) -> str:
+        """
+        Экспортирует железнодорожную сеть (узлы, пути, стрелки, станции) в формат GeoJSON (RFC 7946).
+        Поддерживает стилизацию для отображения в geojson.io, QGIS и Mapbox:
+        - Стрелки (switch): красные маркеры.
+        - Станции (station): зелёные маркеры.
+        - Тупики (buffer_stop): фиолетовые маркеры.
+        - Границы (boundary): оранжевые маркеры.
+        - Физические рельсовые пути: синие линии со свойствами длины и ID сегментов.
+        """
+        filepath = os.path.join(self.storage_dir, f"{filename}.geojson")
+        features = []
+
+        # 1. Узлы графа
+        for node_id, data in graph.nodes(data=True):
+            lon = data.get("lon") or data.get("x") or data.get("longitude")
+            lat = data.get("lat") or data.get("y") or data.get("latitude")
+            if lon is None or lat is None:
+                continue
+
+            node_kind = data.get("node_kind", RailNodeKind.INTERMEDIATE.value)
+            is_switch = data.get("is_switch", False)
+            is_boundary = data.get("is_boundary", False)
+            has_buffer_stop = data.get("has_buffer_stop", False)
+
+            props = {
+                "id": str(node_id),
+                "object_type": data.get("object_type", RailObjectType.RAIL_NODE.value),
+                "node_kind": node_kind,
+                "is_switch": is_switch,
+                "is_boundary": is_boundary,
+                "has_buffer_stop": has_buffer_stop,
+                "transport_mode": "rail",
+            }
+            for opt_key in ("name", "classification_basis", "facility_id", "facility_name", "connection_status", "physical_degree"):
+                if opt_key in data and data[opt_key] is not None:
+                    props[opt_key] = data[opt_key]
+
+            # Стилизация маркеров для geojson.io
+            if node_kind == RailNodeKind.STATION.value:
+                props["marker-color"] = "#2ecc71"
+                props["marker-symbol"] = "rail-metro"
+                props["title"] = f"Станция: {props.get('name', node_id)}"
+            elif is_switch or node_kind == RailNodeKind.SWITCH.value:
+                props["marker-color"] = "#e74c3c"
+                props["marker-symbol"] = "cross"
+                props["title"] = f"Стрелка: {node_id}"
+            elif has_buffer_stop or node_kind == RailNodeKind.BUFFER_STOP.value:
+                props["marker-color"] = "#8e44ad"
+                props["marker-symbol"] = "stop"
+                props["title"] = f"Тупик: {node_id}"
+            elif is_boundary or node_kind == RailNodeKind.BOUNDARY.value:
+                props["marker-color"] = "#f39c12"
+                props["marker-symbol"] = "marker"
+                props["title"] = f"Граница обрезки: {node_id}"
+            elif node_kind == RailNodeKind.JUNCTION.value:
+                props["marker-color"] = "#e67e22"
+                props["marker-symbol"] = "triangle"
+                props["title"] = f"Разветвление: {node_id}"
+            else:
+                props["marker-color"] = "#95a5a6"
+                props["marker-size"] = "small"
+                props["title"] = f"Узел: {node_id}"
+
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [round(float(lon), 6), round(float(lat), 6)],
+                },
+                "properties": props,
+            })
+
+        # 2. Станции-кандидаты (если переданы отдельно и ещё не в графе)
+        if facilities:
+            graph_nodes = set(graph.nodes())
+            for fac in facilities:
+                if any(anc in graph_nodes for anc in getattr(fac, "anchor_node_ids", [])):
+                    continue
+                fac_lon = getattr(fac, "longitude", None)
+                fac_lat = getattr(fac, "latitude", None)
+                if fac_lon is not None and fac_lat is not None:
+                    features.append({
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "Point",
+                            "coordinates": [round(float(fac_lon), 6), round(float(fac_lat), 6)],
+                        },
+                        "properties": {
+                            "id": getattr(fac, "facility_id", str(fac)),
+                            "name": getattr(fac, "name", "Станция"),
+                            "object_type": RailObjectType.RAIL_FACILITY.value,
+                            "node_kind": RailNodeKind.STATION.value,
+                            "connection_status": getattr(fac, "connection_status", "not_checked"),
+                            "cargo_status": getattr(fac, "cargo_status", "unknown"),
+                            "marker-color": "#27ae60",
+                            "marker-symbol": "rail-metro",
+                            "title": f"Станция (маркер): {getattr(fac, 'name', '')}",
+                        },
+                    })
+
+        # 3. Физические рёбра
+        seen_segments = set()
+        edge_iterable = (
+            graph.edges(keys=True, data=True)
+            if graph.is_multigraph()
+            else ((u, v, 0, d) for u, v, d in graph.edges(data=True))
+        )
+        for u, v, k, data in edge_iterable:
+            seg_id = data.get("segment_id") or f"{min(str(u), str(v))}_{max(str(u), str(v))}_{k}"
+            if graph.is_directed() and seg_id in seen_segments:
+                continue
+            seen_segments.add(seg_id)
+
+            coords = None
+            raw_geom = data.get("geometry")
+            if raw_geom is not None and isinstance(raw_geom, LineString):
+                coords = [[round(pt[0], 6), round(pt[1], 6)] for pt in raw_geom.coords]
+            elif raw_geom is not None and hasattr(raw_geom, "geoms"):
+                coords = []
+                for line in raw_geom.geoms:
+                    coords.extend([[round(pt[0], 6), round(pt[1], 6)] for pt in line.coords])
+
+            if not coords or len(coords) < 2:
+                nu = graph.nodes.get(u, {})
+                nv = graph.nodes.get(v, {})
+                ux = nu.get("lon") or nu.get("x")
+                uy = nu.get("lat") or nu.get("y")
+                vx = nv.get("lon") or nv.get("x")
+                vy = nv.get("lat") or nv.get("y")
+                if ux is not None and uy is not None and vx is not None and vy is not None:
+                    coords = [
+                        [round(float(ux), 6), round(float(uy), 6)],
+                        [round(float(vx), 6), round(float(vy), 6)],
+                    ]
+
+            if not coords:
+                continue
+
+            length_m = round(float(data.get("length_m", 0.0)), 2)
+            edge_props = {
+                "id": str(data.get("id") or seg_id),
+                "segment_id": str(seg_id),
+                "source": str(u),
+                "target": str(v),
+                "length_m": length_m,
+                "length_km": round(length_m / 1000.0, 3),
+                "transport_mode": "rail",
+                "stroke": "#2980b9",
+                "stroke-width": 3,
+                "stroke-opacity": 0.85,
+                "title": f"Путь: {seg_id} ({length_m} м)",
+            }
+            for opt_key in ("source_osm_ids", "source_segment_ids"):
+                if opt_key in data and data[opt_key]:
+                    edge_props[opt_key] = data[opt_key]
+
+            features.append({
+                "type": "Feature",
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": coords,
+                },
+                "properties": edge_props,
+            })
+
+        fc = {
+            "type": "FeatureCollection",
+            "features": features,
+        }
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(fc, f, ensure_ascii=False, indent=2)
+
+        return filepath
