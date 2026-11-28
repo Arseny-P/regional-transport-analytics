@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode, type Ref } from 'react';
 import { MapContainer, TileLayer, useMap } from 'react-leaflet';
-import type {  LatLngTuple, Map as LeafletMap } from 'leaflet';
+import type { LatLngTuple, Map as LeafletMap } from 'leaflet';
 import type { BBox } from '@/entities/area';
 import { SelectArea } from '@/features/select-area';
 import { DEFAULT_MAP_CENTER, DEFAULT_MAP_ZOOM, OSM_TILE_URL } from '@/shared/config';
