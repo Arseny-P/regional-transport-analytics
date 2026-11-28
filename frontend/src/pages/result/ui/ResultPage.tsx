@@ -1,7 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import type { LatLngTuple } from 'leaflet';
+import type { BBox } from '@/entities/area';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { AppSidebar } from '@/widgets/app-layout';
 import { MapView } from '@/widgets/map-view';
+import { RegionBoundary, useRegion, useRegions } from '@/entities/region';
 import { MetricSelect } from '@/features/select-metric';
 import {
   GraphLayer,
@@ -35,6 +38,52 @@ const STATUS_LABELS: Record<JobState, string> = {
   failed: 'Ошибка',
 };
 
+function readSavedViewport(
+  state: unknown,
+  jobId: string
+): { center: LatLngTuple; zoom: number } | undefined {
+  const saved = state as { jobId?: unknown; center?: unknown; zoom?: unknown } | null;
+  if (saved?.jobId !== jobId || !Array.isArray(saved.center) || saved.center.length !== 2) return;
+
+  const [lat, lng] = saved.center;
+  const { zoom } = saved;
+  if (
+    typeof lat !== 'number' ||
+    typeof lng !== 'number' ||
+    typeof zoom !== 'number' ||
+    ![lat, lng, zoom].every(Number.isFinite)
+  ) {
+    return;
+  }
+
+  return { center: [lat, lng], zoom };
+}
+
+function readSavedBounds(state: unknown, jobId: string): BBox | undefined {
+  const saved = state as { jobId?: unknown; bounds?: unknown } | null;
+
+  if (saved?.jobId !== jobId || !saved.bounds || typeof saved.bounds !== 'object') {
+    return;
+  }
+
+  const bounds = saved.bounds as Record<string, unknown>;
+  const { minLat, maxLat, minLng, maxLng } = bounds;
+
+  if (
+    typeof minLat !== 'number' ||
+    typeof maxLat !== 'number' ||
+    typeof minLng !== 'number' ||
+    typeof maxLng !== 'number' ||
+    ![minLat, maxLat, minLng, maxLng].every(Number.isFinite) ||
+    minLat > maxLat ||
+    minLng > maxLng
+  ) {
+    return;
+  }
+
+  return { minLat, maxLat, minLng, maxLng };
+}
+
 function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: ReactNode }) {
   const navigate = useNavigate();
   // const [preview, setPreview] = useState<'warehouse' | 'intersection' | null>('intersection');
@@ -60,6 +109,9 @@ function ResultLayout({ sidebar, children }: { sidebar: ReactNode; children?: Re
 
 function JobResult({ jobId }: { jobId: string }) {
   const navigate = useNavigate();
+  const { state } = useLocation();
+  const viewport = readSavedViewport(state, jobId);
+  const bounds = readSavedBounds(state, jobId);
   const {
     status,
     result,
@@ -70,6 +122,10 @@ function JobResult({ jobId }: { jobId: string }) {
     cancel,
     retryResult,
   } = useAnalysisJob(jobId);
+  const [searchParams] = useSearchParams();
+  const { regions } = useRegions();
+  const regionId =
+    searchParams.get('region_id') ?? (regions?.length === 1 ? regions[0].region_id : null);
   const [metric, setMetric] = useState('');
   const [selection, setSelection] = useState<NodeSelection | null>(null);
 
@@ -77,6 +133,9 @@ function JobResult({ jobId }: { jobId: string }) {
   const failureMessage =
     job?.error && job.error.code !== 'analysis_canceled' ? analysisErrorMessage(job.error) : null;
   const graph = result?.graph;
+  const hasGraph = !!graph?.nodes.length;
+  const fallbackRegionId = viewport || hasGraph ? null : regionId;
+  const { region: fallbackRegion } = useRegion(fallbackRegionId);
   const selectedNode =
     selection &&
     graph?.nodes.find(
@@ -100,7 +159,6 @@ function JobResult({ jobId }: { jobId: string }) {
   const isFinal = !!job && isFinalState(job.status);
   const canceled = job?.status === 'canceled';
   const isWaiting = !canceled && !requestFailed && !graph && (!isFinal || isLoadingResult);
-  const hasGraph = !!graph?.nodes.length;
   const showRequestFailure = !canceled && requestFailed && !graph;
   const changeArea = <Button onClick={() => navigate('/start')}>Начать новый анализ</Button>;
   const retryResultControl = resultUnavailable &&
@@ -212,11 +270,17 @@ function JobResult({ jobId }: { jobId: string }) {
   return (
     <ResultLayout sidebar={sidebar}>
       <MapView
+        center={viewport?.center}
+        zoom={viewport?.zoom}
+        bounds={bounds}
         showRegions={false}
         legend={
           <GraphLegend colorBy={metric || undefined} graph={graph} metrics={result?.metrics} />
         }
       >
+        {fallbackRegion && fallbackRegion.region_id === fallbackRegionId && (
+          <RegionBoundary region={fallbackRegion} />
+        )}
         {graph && (
           <GraphLayer
             metrics={result?.metrics ?? []}

@@ -22,7 +22,7 @@ async function createWithRetry(
   }
 }
 
-export function useRunAnalysis(onSuccess: (jobId: string) => void) {
+export function useRunAnalysis() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const activeRequest = useRef<AbortController | null>(null);
@@ -41,7 +41,7 @@ export function useRunAnalysis(onSuccess: (jobId: string) => void) {
         { region_id: regionId, area: toAnalysisArea(area), transports },
         controller.signal
       );
-      if (!controller.signal.aborted) onSuccess(receipt.job_id);
+      if (!controller.signal.aborted) return receipt;
     } catch (err) {
       if (!controller.signal.aborted) setError(errorMessage(err));
     } finally {
