@@ -149,6 +149,8 @@ class AnalysisWorker:
                 await self.transport.commit(ctx)
             return
 
+        initial_transport = "rail" if ("rail" in start_payload.transports) else "road"
+
         try:
             start_payload.validate_transports()
         except ValueError as trans_err:
@@ -157,6 +159,7 @@ class AnalysisWorker:
                 job_id=job_id,
                 code=ErrorCode.UNSUPPORTED_TRANSPORT.value,
                 message=str(trans_err),
+                transport_type=initial_transport,
             )
             if ctx is not None:
                 await self.transport.commit(ctx)
@@ -170,8 +173,16 @@ class AnalysisWorker:
         # 5. Отправка промежуточного статуса running.
         # Ошибка отправки промежуточного статуса не должна срывать запуск вычислений (Issue 2).
         try:
-            await self._emit_status(job_id=job_id, status=TaskStatus.RUNNING.value)
-            self.repository.save_job_state(job_id, status=TaskStatus.RUNNING.value)
+            await self._emit_status(
+                job_id=job_id,
+                status=TaskStatus.RUNNING.value,
+                transport_type=initial_transport,
+            )
+            self.repository.save_job_state(
+                job_id,
+                status=TaskStatus.RUNNING.value,
+                transport_type=initial_transport,
+            )
         except Exception as status_err:
             print(f"[!] Предупреждение: не удалось отправить статус RUNNING для {job_id}: {status_err}")
 
@@ -189,6 +200,9 @@ class AnalysisWorker:
     async def _handle_cancel(self, envelope: KafkaEnvelope, ctx: Optional[Any] = None) -> None:
         """
         Обрабатывает команду отмены вычислений CANCEL.
+        Если задача ещё выполняется — посылает сигнал отмены в токен.
+        Если задача уже завершилась или не активна — переводит её в canceled и подтверждает событием,
+        чтобы в Go-оркестраторе не зависал статус cancel_requested.
         """
         job_id = envelope.job_id
         print(f"[*] Получен запрос на отмену (CANCEL) для задачи {job_id}")
@@ -199,14 +213,28 @@ class AnalysisWorker:
             token.cancel()
             print(f"[+] Сигнал отмены передан в вычислительный процесс задачи {job_id}")
         else:
-            # Задача уже не выполняется или была завершена ранее
+            # Задача уже не выполняется в памяти (завершена ранее или еще не стартовала)
             state = self.repository.get_job_state(job_id)
-            if state and state.get("status") in (TaskStatus.COMPLETED.value, TaskStatus.FAILED.value):
-                print(f"[*] Задача {job_id} уже завершена со статусом {state.get('status')}. Отмена не требуется.")
-            else:
-                # Если задача еще не стартовала, подтверждаем отмену
-                await self._emit_status(job_id=job_id, status=TaskStatus.CANCELED.value)
-                self.repository.save_job_state(job_id=job_id, status=TaskStatus.CANCELED.value)
+            prev_status = state.get("status") if state else None
+            transport_type = (
+                (state.get("transport_type") if state else None)
+                or envelope.transport_type
+                or "road"
+            )
+            print(
+                f"[*] Задача {job_id} не активна в памяти (статус: '{prev_status}'). "
+                f"Применяем отмену по запросу Go-сервиса."
+            )
+            await self._emit_status(
+                job_id=job_id,
+                status=TaskStatus.CANCELED.value,
+                transport_type=transport_type,
+            )
+            self.repository.save_job_state(
+                job_id=job_id,
+                status=TaskStatus.CANCELED.value,
+                transport_type=transport_type,
+            )
 
         # Команда отмены обработана — подтверждаем её оффсет
         if ctx is not None:
@@ -240,7 +268,8 @@ class AnalysisWorker:
             request = AnalysisRequest(
                 territory_type=TerritorySourceType.BBOX.value,
                 bbox=bbox,
-                facility_source=FacilitySourceType.OSM.value,
+                facilities=payload.facilities or [],
+                facility_source=FacilitySourceType.HYBRID.value if payload.facilities else FacilitySourceType.OSM.value,
                 osm_facilities_limit=100,
                 knn=None,
                 transport_mode=transport_mode,
@@ -268,7 +297,12 @@ class AnalysisWorker:
                 elif "валидации" in err_msg:
                     code = ErrorCode.INVALID_PARAMETERS.value
 
-                await self._emit_failed_result(job_id=job_id, code=code, message=err_msg)
+                await self._emit_failed_result(
+                    job_id=job_id,
+                    code=code,
+                    message=err_msg,
+                    transport_type=transport_mode,
+                )
                 if ctx is not None:
                     await self.transport.commit(ctx)
                 return
@@ -287,16 +321,16 @@ class AnalysisWorker:
                 except Exception:
                     log_graph = self.analysis_service.logistics_service.load_graphml(filename=f"{alias}_logistics")
 
-            graph_payload = GraphSerializer.serialize(log_graph)
+            rail_facs = (getattr(response, "facilities", None) or log_graph.graph.get("facilities", [])) if transport_mode == TransportMode.RAIL.value else None
+            graph_payload = GraphSerializer.serialize(log_graph, facilities=rail_facs)
 
             # Расчёт метрик Data Science (#28, #71, Спринт 6)
             try:
                 if transport_mode == TransportMode.RAIL.value:
                     physical_g = getattr(response, "physical_graph", None) or log_graph.graph.get("physical_graph") or log_graph
-                    facs = getattr(response, "facilities", None) or log_graph.graph.get("facilities", [])
                     metrics = RailMetricsService.calculate_metrics(
                         graph=physical_g,
-                        facilities=facs,
+                        facilities=rail_facs,
                         routing_graph=log_graph if log_graph.is_directed() else None,
                     )
                 else:
@@ -325,12 +359,14 @@ class AnalysisWorker:
                 job_id=job_id,
                 msg_type=EventType.RESULT.value,
                 payload=result_payload.to_dict(),
+                transport_type=transport_mode,
             )
             await self.producer.send_event(result_envelope)
             self.repository.save_job_state(
                 job_id=job_id,
                 status=result_payload.status,
                 result_envelope=result_envelope.to_dict(),
+                transport_type=transport_mode,
             )
             print(f"[+] Задача {job_id} успешно завершена со статусом {result_payload.status}.")
 
@@ -340,8 +376,16 @@ class AnalysisWorker:
 
         except TaskCancelledException:
             print(f"[*] Выполнение задачи {job_id} остановлено по сигналу отмены.")
-            await self._emit_status(job_id=job_id, status=TaskStatus.CANCELED.value)
-            self.repository.save_job_state(job_id=job_id, status=TaskStatus.CANCELED.value)
+            await self._emit_status(
+                job_id=job_id,
+                status=TaskStatus.CANCELED.value,
+                transport_type=transport_mode,
+            )
+            self.repository.save_job_state(
+                job_id=job_id,
+                status=TaskStatus.CANCELED.value,
+                transport_type=transport_mode,
+            )
             if ctx is not None:
                 await self.transport.commit(ctx)
 
@@ -351,6 +395,7 @@ class AnalysisWorker:
                 job_id=job_id,
                 code=ErrorCode.INTERNAL_ERROR.value,
                 message=f"Внутренняя ошибка сервиса: {unhandled_err}",
+                transport_type=transport_mode,
             )
             if ctx is not None:
                 await self.transport.commit(ctx)
@@ -359,7 +404,12 @@ class AnalysisWorker:
             self._active_tokens.pop(job_id, None)
             self._active_tasks.pop(job_id, None)
 
-    async def _emit_status(self, job_id: str, status: str) -> None:
+    async def _emit_status(
+        self,
+        job_id: str,
+        status: str,
+        transport_type: Optional[str] = None,
+    ) -> None:
         """
         Отправляет событие STATUS в топик analysis.results.
         """
@@ -368,10 +418,17 @@ class AnalysisWorker:
             job_id=job_id,
             msg_type=EventType.STATUS.value,
             payload=payload,
+            transport_type=transport_type,
         )
         await self.producer.send_event(envelope)
 
-    async def _emit_failed_result(self, job_id: str, code: str, message: str) -> None:
+    async def _emit_failed_result(
+        self,
+        job_id: str,
+        code: str,
+        message: str,
+        transport_type: Optional[str] = None,
+    ) -> None:
         """
         Отправляет событие RESULT failed в топик analysis.results.
         """
@@ -385,6 +442,7 @@ class AnalysisWorker:
             job_id=job_id,
             msg_type=EventType.RESULT.value,
             payload=payload,
+            transport_type=transport_type,
         )
         await self.producer.send_event(envelope)
         self.repository.save_job_state(
@@ -392,6 +450,7 @@ class AnalysisWorker:
             status=TaskStatus.FAILED.value,
             result_envelope=envelope.to_dict(),
             error=message,
+            transport_type=transport_type,
         )
 
 

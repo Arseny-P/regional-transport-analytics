@@ -28,6 +28,7 @@ class JobRepository(ABC):
         status: str,
         result_envelope: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
+        transport_type: Optional[str] = None,
     ) -> None:
         """
         Сохраняет текущий статус задачи и итоговый конверт результата.

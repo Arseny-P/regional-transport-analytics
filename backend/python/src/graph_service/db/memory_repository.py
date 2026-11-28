@@ -36,6 +36,7 @@ class MemoryJobRepository(JobRepository):
         status: str,
         result_envelope: Optional[Dict[str, Any]] = None,
         error: Optional[str] = None,
+        transport_type: Optional[str] = None,
     ) -> None:
         with self._lock:
             now = time.time()
@@ -46,12 +47,15 @@ class MemoryJobRepository(JobRepository):
                     "created_at": now,
                     "updated_at": now,
                     "error": error,
+                    "transport_type": transport_type,
                 }
             else:
                 self._job_states[job_id]["status"] = status
                 self._job_states[job_id]["updated_at"] = now
                 if error:
                     self._job_states[job_id]["error"] = error
+                if transport_type:
+                    self._job_states[job_id]["transport_type"] = transport_type
 
             if result_envelope is not None:
                 self._saved_results[job_id] = result_envelope

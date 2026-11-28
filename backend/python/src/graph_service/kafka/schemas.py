@@ -99,6 +99,7 @@ class AreaPayload:
 class StartCommandPayload:
     area: AreaPayload
     transports: List[str] = field(default_factory=lambda: ["road"])
+    facilities: Optional[List[Dict[str, Any]]] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "StartCommandPayload":
@@ -112,7 +113,11 @@ class StartCommandPayload:
         if not isinstance(transports, list) or len(transports) == 0:
             raise ValueError("Поле 'transports' должно быть непустым списком")
 
-        return cls(area=area, transports=transports)
+        facilities = data.get("facilities")
+        if facilities is not None and not isinstance(facilities, list):
+            raise ValueError("Поле 'facilities' должно быть списком объектов")
+
+        return cls(area=area, transports=transports, facilities=facilities)
 
     def validate_transports(self) -> None:
         """
@@ -132,10 +137,13 @@ class StartCommandPayload:
             )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        res: Dict[str, Any] = {
             "area": self.area.to_dict(),
             "transports": list(self.transports),
         }
+        if self.facilities is not None:
+            res["facilities"] = self.facilities
+        return res
 
 
 @dataclass
@@ -267,6 +275,7 @@ class KafkaEnvelope:
     job_id: str
     type: str
     payload: Dict[str, Any]
+    transport_type: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "KafkaEnvelope":
@@ -280,6 +289,7 @@ class KafkaEnvelope:
             job_id=str(data["job_id"]),
             type=str(data["type"]),
             payload=data["payload"] if isinstance(data["payload"], dict) else {},
+            transport_type=str(data["transport_type"]) if data.get("transport_type") else None,
         )
 
     @classmethod
@@ -289,18 +299,23 @@ class KafkaEnvelope:
         msg_type: str,
         payload: Dict[str, Any],
         message_id: Optional[str] = None,
+        transport_type: Optional[str] = None,
     ) -> "KafkaEnvelope":
         return cls(
             message_id=message_id or str(uuid.uuid4()),
             job_id=job_id,
             type=msg_type,
             payload=payload,
+            transport_type=transport_type,
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        data = {
             "message_id": self.message_id,
             "job_id": self.job_id,
             "type": self.type,
             "payload": self.payload,
         }
+        if self.transport_type:
+            data["transport_type"] = self.transport_type
+        return data

@@ -177,7 +177,11 @@ class GraphSerializer:
         return edge_to_seg
 
     @classmethod
-    def serialize(cls, log_graph: Union[nx.MultiGraph, nx.MultiDiGraph, nx.Graph]) -> GraphPayload:
+    def serialize(
+        cls,
+        log_graph: Union[nx.MultiGraph, nx.MultiDiGraph, nx.Graph],
+        facilities: Optional[List[Any]] = None,
+    ) -> GraphPayload:
         """
         Преобразует граф сети в GraphPayload:
         - Координаты вершин position: строго [lon, lat] с округлением до 6 знаков.
@@ -202,6 +206,7 @@ class GraphSerializer:
 
         if is_rail:
             # 1. Сериализация вершин ЖД
+            existing_node_ids = set()
             for node_id, data in log_graph.nodes(data=True):
                 lon = data.get("x") or data.get("lon") or data.get("longitude")
                 lat = data.get("y") or data.get("lat") or data.get("latitude")
@@ -231,11 +236,59 @@ class GraphSerializer:
                     if opt_key in data and data[opt_key] is not None:
                         node_attrs[opt_key] = data[opt_key]
 
+                existing_node_ids.add(str(node_id))
                 nodes.append(
                     NodePayload(
                         id=str(node_id),
                         position=[round(float(lon), 6), round(float(lat), 6)],
                         attributes=node_attrs,
+                    )
+                )
+
+            # Включение логических вершин станций (rail_facility) в graph.nodes
+            # для полного соответствия OpenAPI (node_id метрики станции указывает на существующую вершину)
+            facs_list = facilities if facilities is not None else log_graph.graph.get("facilities", [])
+            for fac in facs_list:
+                fac_id = (
+                    getattr(fac, "facility_id", None)
+                    or (fac.get("facility_id") if isinstance(fac, dict) else None)
+                    or (fac.get("id") if isinstance(fac, dict) else None)
+                )
+                if not fac_id or str(fac_id) in existing_node_ids:
+                    continue
+
+                fac_name = getattr(fac, "name", "") or (fac.get("name", "") if isinstance(fac, dict) else "")
+                fac_lat = getattr(fac, "latitude", None) or (fac.get("latitude") if isinstance(fac, dict) else (fac.get("lat") if isinstance(fac, dict) else None))
+                fac_lon = getattr(fac, "longitude", None) or (fac.get("longitude") if isinstance(fac, dict) else (fac.get("lon") if isinstance(fac, dict) else None))
+
+                if fac_lon is None or fac_lat is None:
+                    continue
+
+                fac_anchors = getattr(fac, "anchor_node_ids", []) or (fac.get("anchor_node_ids", []) if isinstance(fac, dict) else [])
+                fac_conn = getattr(fac, "connection_status", "not_checked") or (fac.get("connection_status", "not_checked") if isinstance(fac, dict) else "not_checked")
+                fac_cargo = getattr(fac, "cargo_status", "unknown") or (fac.get("cargo_status", "unknown") if isinstance(fac, dict) else "unknown")
+                fac_osm_ids = getattr(fac, "source_osm_ids", []) or (fac.get("source_osm_ids", []) if isinstance(fac, dict) else [])
+
+                station_attrs: Dict[str, Any] = {
+                    "transport_mode": "rail",
+                    "object_type": "rail_facility",
+                    "node_kind": "station",
+                    "name": fac_name,
+                    "facility_id": str(fac_id),
+                    "facility_name": fac_name,
+                    "connection_status": str(fac_conn),
+                    "cargo_status": str(fac_cargo),
+                    "anchor_node_ids": [str(a) for a in fac_anchors],
+                }
+                if fac_osm_ids:
+                    station_attrs["source_osm_ids"] = fac_osm_ids
+
+                existing_node_ids.add(str(fac_id))
+                nodes.append(
+                    NodePayload(
+                        id=str(fac_id),
+                        position=[round(float(fac_lon), 6), round(float(fac_lat), 6)],
+                        attributes=station_attrs,
                     )
                 )
 

@@ -2,6 +2,7 @@
   "message_id": "55555555-5555-4555-8555-555555555555",
   "job_id": "550e8400-e29b-41d4-a716-446655440000",
   "type": "RESULT",
+  "transport_type": "road",
   "payload": {
     "status": "completed",
     "graph": {

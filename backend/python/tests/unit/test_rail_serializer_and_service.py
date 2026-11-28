@@ -127,9 +127,11 @@ def test_territory_analysis_service_rail_shushary():
     assert resp.summary["station_candidates_count"] == 2
     assert resp.summary["switch_count"] == 36
 
-    # Проверяем сериализацию графа
+    # Проверяем сериализацию графа (86 путевых узлов + 2 станции-кандидата = 88 вершин)
     payload = GraphSerializer.serialize(resp.graph_object)
-    assert len(payload.nodes) == 86
+    assert len(payload.nodes) == 88
+    assert len([n for n in payload.nodes if not n.id.startswith("station:")]) == 86
+    assert len([n for n in payload.nodes if n.id.startswith("station:")]) == 2
     assert len(payload.edges) == 180
 
     # Проверяем расчет метрик

@@ -504,12 +504,40 @@ class TerritoryAnalysisService:
 
         # Привязка подтвержденных станций-якорей (если переданы в request.facilities)
         anchors_map: Dict[str, List[str]] = {}
+        existing_ids = {f.facility_id for f in candidates}
+        existing_names = {f.name for f in candidates}
+
         if request.facilities:
             for fac_item in request.facilities:
                 fac_id = str(fac_item.get("id") or fac_item.get("facility_id") or "")
+                fac_name = str(fac_item.get("name") or "")
                 anc_list = fac_item.get("anchor_node_ids") or []
+
                 if fac_id and anc_list:
                     anchors_map[fac_id] = [str(a) for a in anc_list]
+                if fac_name and anc_list:
+                    anchors_map[fac_name] = [str(a) for a in anc_list]
+
+                # Если станция передана пользователем/Go, но отсутствует среди кандидатов OSM
+                if fac_id and fac_id not in existing_ids and (not fac_name or fac_name not in existing_names):
+                    lat = float(fac_item.get("latitude") or fac_item.get("lat") or 0.0)
+                    lon = float(fac_item.get("longitude") or fac_item.get("lon") or 0.0)
+                    candidates.append(
+                        RailFacility(
+                            facility_id=fac_id,
+                            name=fac_name or fac_id,
+                            latitude=lat,
+                            longitude=lon,
+                            anchor_node_ids=[],
+                            connection_status=RailConnectionStatus.NOT_CHECKED.value,
+                            cargo_status=str(fac_item.get("cargo_status", "unknown")),
+                            cargo_evidence=fac_item.get("cargo_evidence"),
+                            source_osm_ids=fac_item.get("source_osm_ids", []),
+                        )
+                    )
+                    existing_ids.add(fac_id)
+                    if fac_name:
+                        existing_names.add(fac_name)
 
         facilities = rail_facility_service.bind_station_anchors(
             facilities=candidates,
