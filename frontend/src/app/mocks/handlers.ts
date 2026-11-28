@@ -18,6 +18,9 @@ interface AnalysisBody {
 interface MockJob {
   scenario: string;
   resultAttempts?: number;
+  heartbeatOutageStartedAt?: number;
+  cancelRequestFailed?: boolean;
+  completedDuringCancel?: boolean;
   params: string;
   transports: string[];
   createdAt: number;
@@ -63,7 +66,9 @@ const QUEUE_MS = 1000;
 const GRAPH_MS = 3000;
 const METRICS_MS = 25000;
 const HEARTBEAT_TIMEOUT_MS = 10000;
+const HEARTBEAT_RESPONSE_OUTAGE_MS = 12_500;
 const CANCEL_CONFIRMATION_MS = 5000;
+const RETRY_FAILURE_COUNT = 3;
 const NODES_COUNT = 15;
 
 const loadJobs = (): Record<string, MockJob> =>
@@ -152,6 +157,9 @@ function statusOf(jobId: string, job: MockJob, now = Date.now()): AnalysisStatus
   const graphReady = elapsed >= GRAPH_MS;
   const base = { job_id: jobId, graph_available: graphReady, metrics_available: false };
 
+  if (job.completedDuringCancel) {
+    return { job_id: jobId, status: 'completed', graph_available: true, metrics_available: true };
+  }
   if (job.scenario === 'canceled' && elapsed >= METRICS_MS)
     return {
       ...base,
@@ -229,8 +237,15 @@ export const handlers = [
     if (now - job.lastSeenAt > HEARTBEAT_TIMEOUT_MS && now - job.createdAt < METRICS_MS) {
       job.canceled = true;
     }
+    const outageStartedAt = job.heartbeatOutageStartedAt ?? now;
+    const dropResponse =
+      job.scenario === 'heartbeat-network-error' &&
+      now - outageStartedAt < HEARTBEAT_RESPONSE_OUTAGE_MS;
+    if (dropResponse) job.heartbeatOutageStartedAt = outageStartedAt;
     job.lastSeenAt = now;
     saveJobs(jobs);
+    if (dropResponse) return HttpResponse.error();
+
     const snapshot = statusOf(jobId, job);
     if (job.scenario === 'slow-heartbeat') await delay(12000);
     return HttpResponse.json(snapshot);
@@ -249,6 +264,17 @@ export const handlers = [
     if (snapshot.status === 'canceled') return HttpResponse.json(snapshot);
     if (snapshot.status === 'cancel_requested') return HttpResponse.json(snapshot, { status: 202 });
 
+    if (job.scenario === 'cancel-race') {
+      job.completedDuringCancel = true;
+      saveJobs(jobs);
+      return error(409, 'job_already_finished', 'Задача уже завершена.');
+    }
+    if (job.scenario === 'cancel-network-error' && !job.cancelRequestFailed) {
+      job.cancelRequestFailed = true;
+      saveJobs(jobs);
+      return HttpResponse.error();
+    }
+
     job.cancellationRequestedAt = now;
     saveJobs(jobs);
     return HttpResponse.json(statusOf(jobId, job, now), { status: 202 });
@@ -259,14 +285,20 @@ export const handlers = [
     if (!job) return error(404, 'job_not_found', 'Задача не найдена.');
 
     const status = statusOf(jobId, job);
-    if (
-      job.scenario === 'retry-final-result' &&
-      status.status === 'completed' &&
-      !job.resultAttempts
-    ) {
-      job.resultAttempts = 1;
+    const failuresBeforeRecovery =
+      job.scenario === 'result-unavailable'
+        ? RETRY_FAILURE_COUNT
+        : job.scenario === 'retry-final-result'
+          ? 1
+          : 0;
+    if (status.status === 'completed' && (job.resultAttempts ?? 0) < failuresBeforeRecovery) {
+      job.resultAttempts = (job.resultAttempts ?? 0) + 1;
       saveJobs(jobs);
-      return error(500, 'temporary_error', 'Retry result');
+      return error(
+        job.scenario === 'result-unavailable' ? 503 : 500,
+        'temporary_error',
+        'Результат временно недоступен.'
+      );
     }
     if (job.scenario === 'slow-result') await delay(12000);
     return HttpResponse.json({
