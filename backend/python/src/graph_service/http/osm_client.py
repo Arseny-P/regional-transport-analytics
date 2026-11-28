@@ -54,8 +54,9 @@ def query_overpass_json(query: str) -> Dict[str, Any]:
 
     for idx, mirror in enumerate(mirrors, start=1):
         try:
+            endpoint = mirror if mirror.endswith("/interpreter") else f"{mirror.rstrip('/')}/interpreter"
             req = urllib.request.Request(
-                mirror,
+                endpoint,
                 data=urllib.parse.urlencode({"data": query}).encode(),
                 headers={"User-Agent": "RegionalTransportAnalytics/1.0 (Python Worker)"},
             )

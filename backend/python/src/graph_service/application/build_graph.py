@@ -430,9 +430,27 @@ class TerritoryAnalysisService:
                 request.bbox.validate()
                 territory_meta["bbox"] = request.bbox.to_dict()
                 alias_base = request.output_alias or request.bbox.cache_key()
+            elif request.territory_type == TerritorySourceType.PLACE_NAME.value:
+                if not request.place_name:
+                    raise TerritoryValidationError("Для territory_type='place_name' необходимо указать 'place_name'.")
+                import osmnx as ox
+                try:
+                    gdf = ox.geocode_to_gdf(request.place_name, which_result=request.which_result)
+                    bounds = gdf.total_bounds
+                    request.bbox = TerritoryBounds(
+                        min_lat=float(bounds[1]),
+                        min_lon=float(bounds[0]),
+                        max_lat=float(bounds[3]),
+                        max_lon=float(bounds[2]),
+                    )
+                    territory_meta["bbox"] = request.bbox.to_dict()
+                    territory_meta["place_name"] = request.place_name
+                    alias_base = request.output_alias or request.place_name.lower().replace(" ", "_").replace(",", "")
+                except Exception as geo_err:
+                    raise TerritoryValidationError(f"Ошибка геокодирования территории '{request.place_name}': {geo_err}") from geo_err
             else:
                 raise TerritoryValidationError(
-                    f"Для железнодорожного анализа поддерживается territory_type='bbox', получено '{request.territory_type}'."
+                    f"Для железнодорожного анализа поддерживается territory_type='bbox' или 'place_name', получено '{request.territory_type}'."
                 )
         except (TerritoryValidationError, ValueError) as val_err:
             return AnalysisResponse(
