@@ -7,10 +7,11 @@ import (
 )
 
 type InboxMessage struct {
-	MessageID uuid.UUID       `json:"message_id"`
-	JobID     uuid.UUID       `json:"job_id"`
-	Type      string          `json:"type"`
-	Payload   AnalysisPayload `json:"payload"`
+	MessageID     uuid.UUID       `json:"message_id"`
+	JobID         uuid.UUID       `json:"job_id"`
+	Type          string          `json:"type"`
+	TransportType string          `json:"transport_type,omitempty"`
+	Payload       AnalysisPayload `json:"payload"`
 }
 
 type AnalysisPayload struct {
